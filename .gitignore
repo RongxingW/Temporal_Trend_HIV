@@ -1,0 +1,16 @@
+# ignore all .txt .Rhistory .RData files
+*.txt
+*.Rproj.user
+*.Rhistory
+*.RData
+*.Ruserdata
+*.png
+
+# Folders to ignore
+projects/*
+!projects/2000_2024_changing_point
+projects/2000_2024_changing_point/*
+#!projects/late_hiv_diagnosis/data
+#projects/late_hiv_diagnosis/data/*
+#!projects/late_hiv_diagnosis/data/xxx.csv
+.Rproj.user

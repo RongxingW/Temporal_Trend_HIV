@@ -1,0 +1,32 @@
+#0-SetupProject#
+================
+This file is to create a new project for the time series analysis.
+The example used is project investigating changing points for HIV notifications from 2000 to 2024.
+
+```{r Initialise}
+# Only requires base R
+
+# Core folders
+projects <- file.path(getwd(), "projects")
+
+```
+
+
+
+Copy all needed files for the model.
+```{r Create project}
+
+name <- "2000_2024_changing_point"
+
+# If project not already created make sure it is not overwritten
+if (!file.exists(file.path(projects, name, "data", "hiv_data.csv"))) {
+    # Create project folders 
+    dir.create(file.path(projects, name))
+    dir.create(file.path(projects, name,"data"))
+    dir.create(file.path(projects, name,"output"))
+    dir.create(file.path(projects, name, "figures"))
+   
+}
+
+```
+
