@@ -1171,9 +1171,13 @@ if (!file.exists(file.path(figFolder, "all_data_lineplot_20250326.png"))) {
 
 
 ```{r Trend Analysis Functions}
-# Combined file with all fixed segmented trend analysis functions
+
+# install.packages(c("segmented","MASS"))  # if not installed
+library(segmented)
+library(MASS)
 
 # Helper function to select every nth element (for plot labels)
+# Keeps only every n-th label (or hides every n-th) so time-axis labels stay readable in plots.
 EveryNth <- function(x, n, inverse = FALSE) {
   if (inverse) {
     if (n == 0) return(x)
@@ -1349,30 +1353,75 @@ get_trend_data <- function(data,
   return(trend_data)
 }
 
-# Function for generating the overall trend and extracting summary stats
-get_trend <- function(trend_data, type = "poisson") {
-  
-  if (type == "poisson") {
-    trend_overall <- glm(notifications ~ time, 
-                        data = trend_data, 
-                        family = "poisson")
-    coeff <- exp(coef(trend_overall)[2])
-    interval <- exp(confint(trend_overall, "time"))
-    p_value <- summary(trend_overall)$coefficients["time", "Pr(>|z|)"]
-  } else {
-    # Linear  
-    trend_overall <- lm(notifications ~ time, data = trend_data)
-    coeff <- coef(trend_overall)[2]
-    interval <- confint(trend_overall, "time")
-    p_value <- summary(trend_overall)$coefficients["time", "Pr(>|t|)"]
+
+# Fits the overall time trend using Poisson or Negative Binomial 
+# and reports the estimated change, confidence interval, and p-value.
+get_trend <- function(trend_data, family_type = "poisson") {
+  if (family_type %in% c("poisson", "POISSON")) {
+    pois_model <- glm(
+  notifications ~ time,
+  data = trend_data,
+  family = poisson(),
+  na.action = na.exclude,
+  model = TRUE, x = TRUE, y = TRUE
+)
+    dispersion <- sum(residuals(pois_model, type = "pearson")^2) / pois_model$df.residual
+    if (is.finite(dispersion) && dispersion > 1.0) {
+      stop(
+        sprintf(
+          "Overdispersion detected (phi = %.2f) under Poisson. Recommended to use family_type = 'NB' (negative binomial).",
+          dispersion
+        )
+      )
+    }
+    beta <- coef(pois_model)["time"]
+    se   <- summary(pois_model)$coefficients["time", "Std. Error"]
+    zcrit <- qnorm(0.975)
+    ci_lin <- c(beta - zcrit * se, beta + zcrit * se)
+    p_value <- 2 * pnorm(-abs(beta / se))
+    coeff   <- exp(beta)
+    interval <- exp(ci_lin)
+
+    return(list(
+      model = pois_model,
+      coeff = coeff,
+      interval = interval,
+      p_value = p_value,
+      type_used = "poisson",
+      dispersion = dispersion
+    ))
   }
-  
-  # Return model and key parameters
-  return(list("model" = trend_overall, 
-              "coeff" = coeff, 
-              "interval" = interval,
-              "p_value" = p_value))
+
+  if (tolower(family_type) == "nb") {
+  nb_model <- MASS::glm.nb(
+    notifications ~ time,
+    data = trend_data,
+    link = log,                  # explicit (default is log, but be clear)
+    na.action = na.exclude,
+    model = TRUE, x = TRUE, y = TRUE,
+    control = glm.control(trace = FALSE)
+  )
+  beta <- coef(nb_model)["time"]
+  se   <- summary(nb_model)$coefficients["time", "Std. Error"]
+  zcrit <- qnorm(0.975)
+  ci_lin <- c(beta - zcrit * se, beta + zcrit * se)
+  p_value <- 2 * pnorm(-abs(beta / se))
+  coeff   <- exp(beta)
+  interval <- exp(ci_lin)
+
+  return(list(
+    model = nb_model,
+    coeff = coeff,
+    interval = interval,
+    p_value = p_value,
+    type_used = "NB",
+    dispersion = NA_real_
+  ))
 }
+
+  stop("Unknown 'family_type'. Use 'poisson' or 'NB'.")
+}
+
 
 # Function for generating overall trend plot
 overall_trend_plot <- function(trend_data, trend_model, count_period = "monthly") {
@@ -1436,7 +1485,8 @@ overall_trend_plot <- function(trend_data, trend_model, count_period = "monthly"
   return(trend_plot)
 }
 
-# Function for overall trend analysis only
+# Runs the complete “overall trend” workflow: prepares data, 
+# fits the model, makes the plot, and returns a tidy summary.
 analyze_overall_trend <- function(data, 
                                start_year = NULL,
                                end_year = NULL,
@@ -1451,7 +1501,7 @@ analyze_overall_trend <- function(data,
                                phn_res_filter = NULL,       # phn_res
                                count_period = "monthly",    # "monthly", "quarterly", or "annually"
                                include_overseas = FALSE,     # Include previously diagnosed overseas
-                               type = "poisson",            # "poisson" or "linear"
+                               family_type = "poisson",            # "poisson" or "linear"
                                save_plots = FALSE,          # Whether to save plots
                                output_dir = NULL,           # Directory to save plots
                                plot_name_prefix = "hiv_trend") {
@@ -1498,7 +1548,7 @@ analyze_overall_trend <- function(data,
   }
   
   # Perform overall trend analysis
-  overall_trend <- get_trend(trend_data, type = type)
+  overall_trend <- get_trend(trend_data, family_type = family_type)
   
   # Create overall trend plot
   overall_plot <- overall_trend_plot(trend_data, overall_trend$model, count_period = count_period) +
@@ -1539,168 +1589,265 @@ seg_CI <- function(est, std_err) {
   return(c(est - 1.96 * std_err, est + 1.96 * std_err))
 }
 
-# Fixed version of get_segmented_trend with correct davies.test type parameter
-get_segmented_trend_fixed <- function(overall_model, initial_changes, type = "poisson") {
-  
+# Fits a joinpoint (segmented) model on top of the base trend, 
+# returning breakpoints with CIs, segment-specific slopes, and BIC.
+get_segmented_trend_fixed <- function(overall_model, initial_changes, family_type = "poisson") {
   require(segmented)
-  
-  # Get the data directly from the model
-  model_data <- overall_model$data
-  
-  # Use segmented without referencing an external trend_data variable
+
+  # 1) Pull a clean data.frame from the fitted model and coerce 'time' to numeric
+  base_df <- as.data.frame(stats::model.frame(overall_model))
+  if (!is.numeric(base_df$time)) base_df$time <- as.numeric(base_df$time)
+  base_formula <- stats::formula(overall_model)
+
+# 2) Refit a clean base model for segmented:
+#    If NB, first estimate theta on a simple NB, then fix it in a GLM with negative.binomial(theta_hat)
+if (inherits(overall_model, "negbin") || tolower(family_type) == "nb") {
+  # one-shot theta estimate on the base (no joinpoints)
+  nb0 <- tryCatch(
+    MASS::glm.nb(base_formula, data = base_df, link = log,
+                 na.action = na.exclude, model = TRUE, x = TRUE, y = TRUE,
+                 control = glm.control(maxit = 100, trace = FALSE)),
+    error = function(e) NULL
+  )
+  if (is.null(nb0)) stop("NB base model failed; cannot proceed to segmented.")
+
+  theta_hat <- nb0$theta
+  # now fit a standard GLM with fixed-theta NB family (stable for segmented)
+  re_fit <- stats::glm(
+    base_formula, data = base_df,
+    family = MASS::negative.binomial(theta_hat),
+    na.action = na.exclude, model = TRUE, x = TRUE, y = TRUE,
+    control = glm.control(maxit = 100)
+  )
+} else {
+  re_fit <- stats::glm(
+    base_formula, data = base_df, family = poisson(),
+    na.action = na.exclude, model = TRUE, x = TRUE, y = TRUE,
+    control = glm.control(maxit = 100)
+  )
+}
+
+
+  # 3) Segment the GLM explicitly via the glm method; keep bootstrapping off (faster, simpler)
   segment_trend <- tryCatch({
-    segmented(overall_model, seg.Z = ~time, psi = list(time = initial_changes))
+    segmented.glm(
+      re_fit,
+      seg.Z = ~ time,
+      psi   = list(time = initial_changes),
+      control = seg.control(n.boot = 0)
+    )
   }, error = function(e) {
-    # Print helpful debugging information
-    cat("Error in segmented function:", conditionMessage(e), "\n")
-    cat("Model formula:", deparse(formula(overall_model)), "\n")
-    cat("Model data variables:", names(model_data), "\n")
-    cat("Initial change points:", initial_changes, "\n")
-    
-    # Return NULL to indicate failure
+    cat("Error in segmented.glm():", conditionMessage(e), "\n")
     return(NULL)
   })
-  
-  # If segmented model creation failed, return NULL
-  if (is.null(segment_trend)) {
-    return(NULL)
-  }
-  
-  # Extract summary stats
+  if (is.null(segment_trend)) return(NULL)
+
+  # internal fitted object for BIC/predictions
+  glm_fit <- if (!is.null(segment_trend$glm.fit)) segment_trend$glm.fit else segment_trend
+
+  seg_BIC  <- tryCatch(BIC(glm_fit),       error = function(e) NA_real_)
+  base_BIC <- tryCatch(BIC(re_fit),        error = function(e) NA_real_)
+
+  # Breakpoint CIs
   psi <- segment_trend$psi
   psi_interval <- tryCatch({
-    confint(segment_trend)
+    confint.segmented(segment_trend)
   }, error = function(e) {
-    cat("Error in confint:", conditionMessage(e), "\n")
-    # Return a minimal interval structure if confint fails
-    return(matrix(c(psi[, "Est."], psi[, "Est."] * 0.9, psi[, "Est."] * 1.1),
-                  ncol = 3,
-                  dimnames = list(NULL, c("Est.", "CI(95%).low", "CI(95%).up"))))
+    se_col <- tryCatch({ summary(segment_trend)$psi[, "Std. Error"] }, error = function(e2) rep(0.05, nrow(psi)))
+    cbind(
+      "Est." = psi[, "Est."],
+      "CI(95%).low" = psi[, "Est."] - 1.96 * se_col,
+      "CI(95%).up"  = psi[, "Est."] + 1.96 * se_col
+    )
   })
-  
-  # Format changepoint date
-  if (is.numeric(model_data$time)) {
-    try({
-      change_date <- round(psi[, "Est."], 4)  # Just use the numeric value
-      change_date_lower <- round(psi_interval[, "CI(95%).low"], 4)
-      change_date_upper <- round(psi_interval[, "CI(95%).up"], 4)
-    }, silent = TRUE)
-    
-    # If there's an error, just use the numeric values
-    if (!exists("change_date")) {
-      change_date <- psi[, "Est."]
-      change_date_lower <- psi_interval[, "CI(95%).low"]
-      change_date_upper <- psi_interval[, "CI(95%).up"]
+
+  # Slopes (log-link → exponentiate to get RR per time unit)
+  slopes_list <- tryCatch({
+    s <- slope(segment_trend)$time
+    list(
+      est = exp(s[, "Est."]),
+      lo  = exp(s[, "CI(95%).l"]),
+      up  = exp(s[, "CI(95%).u"])
+    )
+  }, error = function(e) {
+    k <- nrow(psi) + 1
+    list(est = rep(1, k), lo = rep(0.9, k), up = rep(1.1, k))
+  })
+
+  change_date <- data.frame(
+    Estimate = round(psi[, "Est."], 4),
+    Lower_CI = round(psi_interval[, "CI(95%).low"], 4),
+    Upper_CI = round(psi_interval[, "CI(95%).up"], 4)
+  )
+
+    # --- Wald tests for slope change at each joinpoint ---
+  # Each 'Uj.time' coefficient in segmented encodes the change in slope at joinpoint j.
+  wald_tab <- tryCatch({
+    coefs <- coef(summary(segment_trend))
+    rn <- rownames(coefs)
+    idx <- which(grepl("^U\\d*\\.time$", rn))   # robust match for U1.time, U2.time, ...
+    if (length(idx) == 0) {
+      # fallback: any 'U.*time' term
+      idx <- which(grepl("^U.*\\.time$", rn))
     }
-  } else {
-    # For data that might not be in decimal format
-    change_date <- psi[, "Est."]
-    change_date_lower <- psi_interval[, "CI(95%).low"]
-    change_date_upper <- psi_interval[, "CI(95%).up"]
-  }
-  
-  # Generate stats with extra error handling
-  slopes <- NULL
-  slopes_lower <- NULL
-  slopes_upper <- NULL
-  
-  tryCatch({
-    if (type == "poisson") { 
-      # Transform the slopes to get RR
-      slopes <- exp(slope(segment_trend)$time[, "Est."]) 
-      slopes_lower <- exp(slope(segment_trend)$time[, "CI(95%).l"])
-      slopes_upper <- exp(slope(segment_trend)$time[, "CI(95%).u"])
+    if (length(idx) == 0) {
+      data.frame(
+        Joinpoint = integer(0), Term = character(0),
+        Estimate = numeric(0), SE = numeric(0), z = numeric(0),
+        p_value = numeric(0), stringsAsFactors = FALSE
+      )
     } else {
-      # Linear 
-      slopes <- slope(segment_trend)$time[, "Est."]
-      slopes_lower <- slope(segment_trend)$time[, "CI(95%).l"]
-      slopes_upper <- slope(segment_trend)$time[, "CI(95%).u"]
+      out <- coefs[idx, , drop = FALSE]
+      # align with psi rows by order
+      jp_idx <- seq_len(nrow(out))
+      # z and p (defensive compute even if summary already provides z/p)
+      zvals <- out[, "Estimate"] / out[, "Std. Error"]
+      pvals <- 2 * pnorm(-abs(zvals))
+
+      # attach the joinpoint decimal time + month label
+      jp_time <- if (!is.null(psi)) psi[, "Est."] else rep(NA_real_, length(idx))
+      to_month <- function(x) format(lubridate::round_date(lubridate::date_decimal(x), unit = "month"), "%Y-%m")
+
+      data.frame(
+        Joinpoint      = jp_idx,
+        Term           = rownames(out),
+        Estimate       = out[, "Estimate"],
+        SE             = out[, "Std. Error"],
+        z              = zvals,
+        p_value        = pvals,
+        JP_Time        = jp_time,
+        JP_Time_Month  = if (length(jp_time)) to_month(jp_time) else character(0),
+        # optional: multiplicative change in slope on log-link scale
+        Exp_Estimate   = exp(out[, "Estimate"]),
+        stringsAsFactors = FALSE
+      )
     }
   }, error = function(e) {
-    cat("Error calculating slopes:", conditionMessage(e), "\n")
-    # Create some default values
-    slopes <- rep(1, length(psi[, "Est."]) + 1)
-    slopes_lower <- slopes * 0.9
-    slopes_upper <- slopes * 1.1
+    data.frame(
+      Joinpoint = integer(0), Term = character(0),
+      Estimate = numeric(0), SE = numeric(0), z = numeric(0),
+      p_value = numeric(0), JP_Time = numeric(0), JP_Time_Month = character(0),
+      Exp_Estimate = numeric(0), stringsAsFactors = FALSE
+    )
   })
   
-  # Calculate BIC for segmented vs overall trends
-  bics <- tryCatch({
-    c("segment_BIC" = BIC(segment_trend), "overall_BIC" = BIC(overall_model))
-  }, error = function(e) {
-    cat("Error calculating BIC:", conditionMessage(e), "\n")
-    return(c("segment_BIC" = NA, "overall_BIC" = NA))
-  })
-  
-  # Calculate statistical significance of change points using a Davies' Test
-  # Use "wald" for type parameter specifically - this is the key fix
-  davies_test <- tryCatch({
-    davies.test(overall_model, seg.Z = ~time, k = length(overall_model$residuals), type = "wald")
-  }, error = function(e) {
-    cat("Error in Davies test:", conditionMessage(e), "\n")
-    return(list(statistic = NA, p.value = NA))
-  })
-  
-  # Return list of outputs
-  return(list(segment_model = segment_trend, 
-              psi = psi, 
-              psi_interval = psi_interval, 
-              change_date = data.frame(
-                Estimate = change_date, 
-                Lower_CI = change_date_lower,
-                Upper_CI = change_date_upper
-              ), 
-              slopes = slopes, 
-              slopes_lower = slopes_lower, 
-              slopes_upper = slopes_upper, 
-              bics = bics, 
-              davies_test = davies_test))
+
+# Calculate Average APC (AAPC) for the entire period
+aapc <- tryCatch({
+  # For segmented models, AAPC is weighted average of segment slopes
+  if (!is.null(psi) && nrow(psi) > 0) {
+    # Get time range
+    time_range <- range(base_df$time, na.rm = TRUE)
+    total_time <- diff(time_range)
+    
+    # Calculate segment lengths
+    breaks <- c(time_range[1], psi[, "Est."], time_range[2])
+    seg_lengths <- diff(breaks)
+    weights <- seg_lengths / total_time
+    
+    # Weighted average of log-scale slopes (then exponentiate)
+    log_slopes <- log(slopes_list$est)
+    aapc_log <- sum(weights * log_slopes)
+    aapc_est <- exp(aapc_log)
+    
+    # For CI: similar weighted average on log scale
+    log_slopes_lo <- log(slopes_list$lo)
+    log_slopes_up <- log(slopes_list$up)
+    aapc_lo <- exp(sum(weights * log_slopes_lo))
+    aapc_up <- exp(sum(weights * log_slopes_up))
+    
+    list(est = aapc_est, lo = aapc_lo, up = aapc_up)
+  } else {
+    # For k=0 (no joinpoints), AAPC = single slope
+    list(est = slopes_list$est[1], lo = slopes_list$lo[1], up = slopes_list$up[1])
+  }
+}, error = function(e) {
+  list(est = NA, lo = NA, up = NA)
+})
+
+
+list(
+  segment_model = segment_trend,
+  psi = psi,
+  psi_interval = psi_interval,
+  change_date = change_date,
+  slopes = slopes_list$est,
+  slopes_lower = slopes_list$lo,
+  slopes_upper = slopes_list$up,
+  bics = c("segment_BIC" = seg_BIC, "overall_BIC" = base_BIC),
+  model_type = ifelse(tolower(family_type) == "nb", "NB", "poisson"),
+  wald_slope_change = wald_tab,
+  aapc = aapc  
+)  
 }
 
-# Fixed version of find_best_segment_model
-find_best_segment_model_fixed <- function(model, data_years, num_changes = 1) {
-  
+
+
+# (Helper) Fits a model with exactly k joinpoints and returns that model’s BIC for comparison.
+.fit_k_joinpoints <- function(base_model, data_years, k, family_type = "poisson") {
+  # k = 0 -> no joinpoint: use base_model
+  if (k == 0) {
+    return(list(
+      k = 0,
+      fit = list(
+        segment_model = NULL,  # no segmented object
+        psi = NULL,
+        psi_interval = NULL,
+        change_date = NULL,
+        slopes = NULL,
+        slopes_lower = NULL,
+        slopes_upper = NULL,
+        bics = c("segment_BIC" = BIC(base_model), "overall_BIC" = BIC(base_model)),
+        model_type = ifelse(tolower(family_type) == "nb", "NB", "poisson"),
+        # carry the base model for plotting/prediction when needed
+        base_model = base_model
+      ),
+      bic = BIC(base_model)
+    ))
+  }
+
+  # Generate evenly spaced initial psi across observed time support
+  min_year <- min(data_years); max_year <- max(data_years)
+  initial_points <- seq(min_year, max_year, length.out = k + 2)[2:(k + 1)]
+
+  seg_fit <- get_segmented_trend_fixed(base_model, initial_points, family_type = family_type)
+  if (is.null(seg_fit)) {
+    return(list(k = k, fit = NULL, bic = Inf))
+  }
+
+  seg_bic <- as.numeric(seg_fit$bics["segment_BIC"])
+  if (!is.finite(seg_bic)) seg_bic <- Inf
+
+  list(k = k, fit = seg_fit, bic = seg_bic)
+}
+
+# Tries 0..K joinpoints, compares BICs, and picks the model with the best (lowest) BIC.
+find_best_segment_model_fixed <- function(model, data_years, num_changes = 1, family_type = "poisson") {
   require(segmented)
-  
-  # Calculate middle year in dataset for initial change point
-  mid_year <- median(data_years)
-  cat("Using mid year:", mid_year, "\n")
-  
-  if (num_changes == 1) {
-    # Try single change point
-    cat("Attempting to find a single change point\n")
-    seg_model <- get_segmented_trend_fixed(model, mid_year)
-    return(seg_model)
-  } else {
-    # Try multiple change points
-    seg_models <- list()
-    min_year <- min(data_years)
-    max_year <- max(data_years)
-    span <- max_year - min_year
-    
-    if (num_changes == 2) {
-      initial_points <- c(min_year + span/3, max_year - span/3)
-      cat("Attempting to find 2 change points at:", initial_points, "\n")
-      seg_models[[1]] <- get_segmented_trend_fixed(model, initial_points)
-    } else if (num_changes == 3) {
-      initial_points <- c(min_year + span/4, mid_year, max_year - span/4)
-      cat("Attempting to find 3 change points at:", initial_points, "\n")
-      seg_models[[1]] <- get_segmented_trend_fixed(model, initial_points)
-    } else if (num_changes == 4) {
-      initial_points <- c(min_year + span/5, min_year + 2*span/5, 
-                        max_year - 2*span/5, max_year - span/5)
-      cat("Attempting to find 4 change points at:", initial_points, "\n")
-      seg_models[[1]] <- get_segmented_trend_fixed(model, initial_points)
-    } else {
-      stop("Number of change points must be between 1 and 4")
-    }
-    
-    return(seg_models[[1]])
+
+  # Fit all candidates
+  candidates <- lapply(0:num_changes, function(k) .fit_k_joinpoints(model, data_years, k, family_type = family_type))
+
+  # Pick the lowest BIC
+  bics <- sapply(candidates, function(x) x$bic)
+  best_idx <- which.min(bics)
+  best <- candidates[[best_idx]]
+
+  if (is.null(best$fit)) {
+    cat("All segmented attempts failed; returning base model.\n")
+    return(candidates[[1]]$fit)  # k=0
   }
+
+  # Attach selected_k and a tidy small table of all BICs
+  best$fit$selected_k <- best$k
+  best$fit$all_bic <- data.frame(
+    Joinpoints = 0:num_changes,
+    BIC = bics
+  )
+  return(best$fit)
 }
 
-# Modified segment_plot function with better error handling
-# Fixed segment_plot function that properly handles psi_interval indices
+# Plots the data and the chosen segmented fit, marking each estimated joinpoint with a dashed line.
 segment_plot_fixed <- function(trend_data, trend_model, count_period = "monthly", 
                               overall_plot = FALSE, overall_model = NULL, 
                               segment_plot = TRUE, y_upper = NULL, y_break = NULL) {
@@ -1770,7 +1917,7 @@ auto_upper <- if (is.finite(max_y) && max_y > 0) {
       # Clean white background
       plot.background = element_rect(fill = "white", color = NA),
       # Reasonable margins
-      plot.margin = margin(t = 20, r = 30, b = 20, l = 20, unit = "pt"),
+      plot.margin = margin(t = 5, r = 5, b = 5, l = 5, unit = "pt"),
       legend.position = "bottom"
     ) 
 
@@ -1815,32 +1962,34 @@ auto_upper <- if (is.finite(max_y) && max_y > 0) {
   return(trend_plot)
 }
 
-  
 
-# Complete function for segmented trend analysis with simplified plot function
+# End-to-end segmented analysis: prepares data, fits overall model, 
+# selects joinpoints by BIC, converts joinpoints to months, and returns plots and results.
 analyze_segmented_trend_complete <- function(data, 
-                                        start_year = NULL,
-                                        end_year = NULL,
-                                        # Filtering options
-                                        exposure_filter = NULL,      # hiv_exposure_risk
-                                        gender_filter = NULL,        # gender
-                                        region_birth_filter = NULL,  # region_birth
-                                        au_birth_filter = NULL,      # au_birth
-                                        lang_home_filter = NULL,     # lang_home
-                                        place_acq_filter = NULL,     # place_acq
-                                        state_res_filter = NULL,     # state_res
-                                        phn_res_filter = NULL,       # phn_res
-                                        count_period = "monthly",    # "monthly", "quarterly", or "annually"
-                                        include_overseas = FALSE,     # Include previously diagnosed overseas
-                                        type = "poisson",            # "poisson" or "linear"
-                                        num_changes = 1,             # Number of change points (1-4)
-                                        show_overall = TRUE,         # Whether to show overall trend
-                                        show_segment = TRUE,        # Whether to show segmented trend lines
-                                        y_upper = NULL, 
-                                        y_break = NULL) {       
-  
-  # First run the overall trend analysis to get the data and model
-  overall_results <- analyze_overall_trend(
+                                             start_year = NULL,
+                                             end_year = NULL,
+                                             exposure_filter = NULL,
+                                             gender_filter = NULL,
+                                             region_birth_filter = NULL,
+                                             au_birth_filter = NULL,
+                                             lang_home_filter = NULL,
+                                             place_acq_filter = NULL,
+                                             state_res_filter = NULL,
+                                             phn_res_filter = NULL,
+                                             count_period = "monthly",
+                                             include_overseas = FALSE,
+                                             family_type = "poisson",         # "poisson" or "NB"
+                                             num_changes = 1,          # compare 0..num_changes
+                                             show_overall = TRUE,
+                                             show_segment = TRUE,
+                                             y_upper = NULL, 
+                                             y_break = NULL,
+                                             plot_name_prefix = NULL,
+                                             main_title = NULL,
+                                             sub_title = NULL) {
+
+  # 1) build trend_data
+  trend_data <- get_trend_data(
     data = data,
     start_year = start_year,
     end_year = end_year,
@@ -1853,360 +2002,214 @@ analyze_segmented_trend_complete <- function(data,
     state_res_filter = state_res_filter,
     phn_res_filter = phn_res_filter,
     count_period = count_period,
-    include_overseas = include_overseas,
-    type = type,
-    plot_name_prefix = plot_name_prefix
+    include_overseas = include_overseas
   )
-  
-  # Check if overall analysis succeeded
-  if (is.null(overall_results)) {
-    cat("Overall trend analysis failed. Cannot proceed with segmented analysis.\n")
-    return(NULL)
-  }
-  
-  # Extract needed data from overall_results
-  trend_data <- overall_results$trend_data
-  overall_trend_model <- overall_results$overall_trend$model
+
+  # 2) fit overall (base) model
+  overall_results <- get_trend(trend_data, family_type = family_type)
+  overall_trend_model <- overall_results$model
   data_years <- unique(floor(trend_data$time))
-  
-  
-  # Run segmented model analysis with fixed function
-  cat("Running segmented trend analysis with", num_changes, "change point(s)...\n")
-  segmented_model <- find_best_segment_model_fixed(
-    model = overall_trend_model, 
-    data_years = data_years, 
-    num_changes = num_changes
-  )
-  
-  # Check if segmented analysis succeeded
-  if (is.null(segmented_model)) {
-    cat("Segmented trend analysis failed. Try a different number of change points or check the data.\n")
-    return(NULL)
-  }
-  
-  # Print debug info about the segmented model
-  cat("Segmented model created successfully with", nrow(segmented_model$psi), "change points\n")
-  
-  # Create segmented plot with simplified function
-  segment_plot_result <- segment_plot_fixed(
-    trend_data = trend_data, 
-    trend_model = segmented_model, 
-    count_period = count_period,
-    overall_plot = show_overall,
-    overall_model = overall_trend_model,
-    segment_plot = show_segment,
-    y_upper = y_upper, 
-    y_break = y_break
-  )
-  
-  # Get subtitle from overall plot if available
-  subtitle <- if (!is.null(overall_results$overall_plot$labels$subtitle)) {
-    overall_results$overall_plot$labels$subtitle
-  } else {
-    NULL
-  }
-  
-  # Add title to plot
-  segment_plot_result <- segment_plot_result +
-    ggtitle(paste0("HIV Notification Segmented Trend (", count_period, ")"), subtitle = subtitle)
-  
-  
-  # Format results for reporting
-  # 1. Create change points table
-  if (!is.null(segmented_model$change_date) && nrow(segmented_model$change_date) > 0) {
-    # Convert decimal time to year-month format when appropriate
-    change_points <- segmented_model$change_date
-    
-    # For monthly or quarterly data, try to convert decimal years to more readable format
-    if (count_period %in% c("monthly", "quarterly")) {
-      tryCatch({
-        # Function to convert decimal year to year-month format
-        decimal_to_yearmonth <- function(decimal_year) {
-          year <- floor(decimal_year)
-          fraction <- decimal_year - year
-          month <- ceiling(fraction * 12)
-          if (month == 0) month <- 1
-          if (month > 12) {
-            year <- year + 1
-            month <- 1
-          }
-          return(paste0(year, "-", sprintf("%02d", month)))
-        }
-        
-        # Try to apply the conversion
-        change_points$Estimate_YearMonth <- sapply(change_points$Estimate, decimal_to_yearmonth)
-        change_points$Lower_CI_YearMonth <- sapply(change_points$Lower_CI, decimal_to_yearmonth)
-        change_points$Upper_CI_YearMonth <- sapply(change_points$Upper_CI, decimal_to_yearmonth)
-      }, error = function(e) {
-        # If conversion fails, just keep the decimal format
-        cat("Note: Could not convert change points to year-month format.\n")
-      })
-    }
-    
-    # Add labels for change points
-    change_points_table <- data.frame(
-      Change_Point = 1:nrow(change_points),
-      Estimate = change_points$Estimate,
-      Lower_CI = change_points$Lower_CI,
-      Upper_CI = change_points$Upper_CI
-    )
-    
-    # Add year-month format if available
-    if ("Estimate_YearMonth" %in% names(change_points)) {
-      change_points_table$Estimate_YearMonth <- change_points$Estimate_YearMonth
-      change_points_table$CI_YearMonth <- paste0("(", 
-                                              change_points$Lower_CI_YearMonth, " to ", 
-                                              change_points$Upper_CI_YearMonth, ")")
-    }
-  } else {
-    change_points_table <- data.frame(
-      Change_Point = 1,
-      Estimate = NA,
-      Lower_CI = NA,
-      Upper_CI = NA
-    )
-  }
-  
-  # 2. Format segmented trend results (slopes)
-  if (!is.null(segmented_model$slopes)) {
-    # For Poisson regression, slopes are rate ratios
-    if (type == "poisson") {
-      segment_labels <- paste0("Segment ", 1:length(segmented_model$slopes))
-      
-      segment_results <- data.frame(
-        Segment = segment_labels,
-        Rate_Ratio = segmented_model$slopes,
-        Lower_CI = segmented_model$slopes_lower,
-        Upper_CI = segmented_model$slopes_upper
-      )
-      
-      # Add percentage change per year interpretation
-      segment_results$Percent_Change_Per_Year <- paste0(
-        sprintf("%.1f%%", (segmented_model$slopes - 1) * 100),
-        " (", 
-        sprintf("%.1f%%", (segmented_model$slopes_lower - 1) * 100),
-        " to ",
-        sprintf("%.1f%%", (segmented_model$slopes_upper - 1) * 100),
-        ")"
-      )
-      
-      # Add interpretation
-      segment_results$Interpretation <- ifelse(
-        segmented_model$slopes > 1, "Increasing", 
-        ifelse(segmented_model$slopes < 1, "Decreasing", "Stable")
-      )
-      
-      # Add significance based on whether CI includes 1
-      segment_results$Significant <- ifelse(
-        (segmented_model$slopes_lower > 1) | (segmented_model$slopes_upper < 1),
-        "Yes", "No"
-      )
-    } else {
-      # For linear regression, slopes are absolute changes
-      segment_labels <- paste0("Segment ", 1:length(segmented_model$slopes))
-      
-      segment_results <- data.frame(
-        Segment = segment_labels,
-        Slope = segmented_model$slopes,
-        Lower_CI = segmented_model$slopes_lower,
-        Upper_CI = segmented_model$slopes_upper
-      )
-      
-      # Add interpretation
-      segment_results$Interpretation <- ifelse(
-        segmented_model$slopes > 0, "Increasing", 
-        ifelse(segmented_model$slopes < 0, "Decreasing", "Stable")
-      )
-      
-      # Add significance based on whether CI includes 0
-      segment_results$Significant <- ifelse(
-        (segmented_model$slopes_lower > 0) | (segmented_model$slopes_upper < 0),
-        "Yes", "No"
-      )
-    }
-  } else {
-    # Default empty results if slopes are not available
+
+  # 3) run selection across k=0..num_changes and pick best by BIC
+  cat("Running BIC-based selection across 0..", num_changes, " joinpoints\n")
+  selected <- find_best_segment_model_fixed(model = overall_trend_model,
+                                            data_years = data_years,
+                                            num_changes = num_changes,
+                                            family_type = family_type)
+
+  selected_k <- if (!is.null(selected$selected_k)) selected$selected_k else 0
+  cat("Selected number of joinpoints (by BIC):", selected_k, "\n")
+
+  # 4) Plot (use your existing segment_plot_fixed)
+  # If selected_k == 0, we have no segmented object; just plot overall
+  if (selected_k == 0) {
+    # Use the overall plot function you already have
+    overall_plot <- overall_trend_plot(trend_data, overall_trend_model, count_period = count_period)
+    segment_plot_result <- overall_plot + ggtitle(
+  ifelse(is.null(main_title), paste0("HIV Notification Trend (", count_period, ")"), main_title),
+  subtitle = ifelse(is.null(sub_title), "Selected model: 0 joinpoints (BIC)", sub_title)
+)
+
+    change_points_table <- data.frame(Change_Point = integer(0),
+                                      Estimate = numeric(0),
+                                      Lower_CI = numeric(0),
+                                      Upper_CI = numeric(0))
     segment_results <- data.frame(
-      Segment = "N/A",
-      Slope_or_RateRatio = NA,
-      Lower_CI = NA,
-      Upper_CI = NA,
-      Interpretation = "Analysis failed"
-    )
-  }
-  
-  # 3. Create davies test results for change point significance
-  if (!is.null(segmented_model$davies_test)) {
-    davies_test_result <- data.frame(
-      Test = "Davies Test (H0: No change point)",
-      Test_Statistic = segmented_model$davies_test$statistic,
-      P_value = segmented_model$davies_test$p.value
-    )
-    
-    # Add interpretation
-    davies_test_result$Interpretation <- ifelse(
-      segmented_model$davies_test$p.value < 0.05,
-      "Significant change point detected (p < 0.05)",
-      "No significant change point detected (p ≥ 0.05)"
+      Segment = "Overall",
+      Rate_Ratio = overall_results$coeff,
+      Lower_CI = overall_results$interval[1],
+      Upper_CI = overall_results$interval[2],
+      Percent_Change_Per_Year = sprintf("%.1f%% (%.1f%% to %.1f%%)",
+                                        (overall_results$coeff - 1) * 100,
+                                        (overall_results$interval[1] - 1) * 100,
+                                        (overall_results$interval[2] - 1) * 100),
+      Interpretation = ifelse(overall_results$coeff > 1, "Increasing",
+                              ifelse(overall_results$coeff < 1, "Decreasing", "Stable")),
+      Significant = ifelse(
+        overall_results$interval[1] > 1 | overall_results$interval[2] < 1, "Yes", "No"
+      )
     )
   } else {
-    davies_test_result <- data.frame(
-      Test = "Davies Test (H0: No change point)",
-      Test_Statistic = NA,
-      P_value = NA,
-      Interpretation = "Test failed"
-    )
-  }
-  
-  # 4. Compare BIC between overall and segmented models
-  if (!is.null(segmented_model$bics)) {
-    bic_comparison <- data.frame(
-      Model = c("Overall Model", "Segmented Model"),
-      BIC = c(segmented_model$bics["overall_BIC"], segmented_model$bics["segment_BIC"])
-    )
-    
-    # Add BIC difference and interpretation
-    bic_diff <- segmented_model$bics["overall_BIC"] - segmented_model$bics["segment_BIC"]
-    bic_comparison$BIC_Difference <- c(NA, bic_diff)
-    
-    # Interpretation of BIC difference
-    # Positive difference means segmented model is better
-    if (bic_diff > 10) {
-      bic_interpretation <- "Very strong evidence favoring segmented model"
-    } else if (bic_diff > 6) {
-      bic_interpretation <- "Strong evidence favoring segmented model"
-    } else if (bic_diff > 2) {
-      bic_interpretation <- "Positive evidence favoring segmented model"
-    } else if (bic_diff > 0) {
-      bic_interpretation <- "Weak evidence favoring segmented model"
-    } else {
-      bic_interpretation <- "Evidence favors overall model (no change points)"
-    }
-    
-    bic_comparison$Interpretation <- c(NA, bic_interpretation)
-  } else {
-    bic_comparison <- data.frame(
-      Model = c("Overall Model", "Segmented Model"),
-      BIC = NA,
-      BIC_Difference = NA,
-      Interpretation = NA
-    )
-  }
-  
-  # Create a full results object with all the components
-  full_results <- list(
-    # Original results
-    overall_results = overall_results,
-    segmented_model = segmented_model,
-    segment_plot = segment_plot_result,
-    
-    # Formatted tables
-    change_points = change_points_table,
-    segment_results = segment_results,
-    davies_test = davies_test_result,
-    bic_comparison = bic_comparison,
-    
-    # Analysis parameters
-    parameters = list(
-      start_year = start_year,
-      end_year = end_year,
-      exposure_filter = exposure_filter,
-      gender_filter = gender_filter,
-      count_period = count_period,
-      include_overseas = include_overseas,
-      type = type,
-      num_changes = num_changes,
-      show_overall = show_overall,
-      show_segment = show_segment
-    )
+    # Prepare segmented plot with your function
+    segment_plot_result <- segment_plot_fixed(
+  trend_data = trend_data,
+  trend_model = selected,                 
+  count_period = count_period,
+  overall_plot = show_overall,
+  overall_model = overall_trend_model,
+  segment_plot = show_segment,
+  y_upper = y_upper,
+  y_break = y_break
+) + ggtitle(
+  ifelse(is.null(main_title), paste0("HIV Notification Segmented Trend (", count_period, ")"), main_title),
+  subtitle = ifelse(is.null(sub_title), paste0("Selected model: ", selected_k, " joinpoint(s) (BIC)"), sub_title)
+)
+
+
+    # change points table
+    if (!is.null(selected$change_date) && nrow(selected$change_date) > 0) {
+  to_month <- function(x) format(lubridate::round_date(lubridate::date_decimal(x), unit = "month"), "%Y-%m")
+  change_points_table <- data.frame(
+    Change_Point = seq_len(nrow(selected$change_date)),
+    Estimate      = selected$change_date$Estimate,
+    Lower_CI      = selected$change_date$Lower_CI,
+    Upper_CI      = selected$change_date$Upper_CI,
+    Estimate_Month = to_month(selected$change_date$Estimate),
+    Lower_CI_Month = to_month(selected$change_date$Lower_CI),
+    Upper_CI_Month = to_month(selected$change_date$Upper_CI)
   )
-  
-  # Print summary report to console
-  cat("\n=== SEGMENTED TREND ANALYSIS SUMMARY ===\n")
-  cat("Period:", count_period, "data from", start_year, "to", end_year, "\n")
-  
-  # Add filter information to report
-  filter_text <- c()
-  if (!is.null(exposure_filter)) filter_text <- c(filter_text, paste("Exposure:", exposure_filter))
-  if (!is.null(gender_filter)) filter_text <- c(filter_text, paste("Gender:", gender_filter))
-  if (!is.null(region_birth_filter)) filter_text <- c(filter_text, paste("Region of birth:", region_birth_filter))
-  if (!is.null(au_birth_filter)) filter_text <- c(filter_text, paste("Birth place:", au_birth_filter))
-  if (!is.null(state_res_filter)) filter_text <- c(filter_text, paste("State:", state_res_filter))
-  if (!is.null(phn_res_filter)) filter_text <- c(filter_text, paste("PHN:", phn_res_filter))
-  
-  if (length(filter_text) > 0) {
-    cat("Filters applied:", paste(filter_text, collapse=", "), "\n")
-  } else {
-    cat("No filters applied (all data)\n")
-  }
-  
-  # Print change points
-  cat("\nChange Points:\n")
-  if ("Estimate_YearMonth" %in% names(change_points_table)) {
-    print(change_points_table[, c("Change_Point", "Estimate_YearMonth", "CI_YearMonth")])
-  } else {
-    print(change_points_table[, c("Change_Point", "Estimate", "Lower_CI", "Upper_CI")])
-  }
-  
-  # Print Davies test results
-  cat("\nChange Point Significance Test:\n")
-  print(davies_test_result[, c("Test", "P_value", "Interpretation")])
-  
-  # Print segment results
-  cat("\nSegment Trends:\n")
-  if (type == "poisson") {
-    print(segment_results[, c("Segment", "Rate_Ratio", "Percent_Change_Per_Year", "Interpretation", "Significant")])
-  } else {
-    print(segment_results[, c("Segment", "Slope", "Lower_CI", "Upper_CI", "Interpretation", "Significant")])
-  }
-  
-  # Print BIC comparison
-  cat("\nModel Comparison (BIC):\n")
-  print(bic_comparison[, c("Model", "BIC", "BIC_Difference", "Interpretation")])
-  
-  cat("\nAnalysis completed successfully.\n")
-  
-  # Return the full results object
-  return(full_results)
+} else {
+  change_points_table <- data.frame(
+    Change_Point  = integer(0),
+    Estimate      = numeric(0),
+    Lower_CI      = numeric(0),
+    Upper_CI      = numeric(0),
+    Estimate_Month = character(0),
+    Lower_CI_Month = character(0),
+    Upper_CI_Month = character(0)
+  )
 }
 
-#### Run the overall trend analysis and segmented trend analysis #### 
-#### All populations ####
+    # segment results
+    segment_results <- data.frame(
+      Segment = paste0("Segment ", seq_along(selected$slopes)),
+      Rate_Ratio = selected$slopes,
+      Lower_CI = selected$slopes_lower,
+      Upper_CI = selected$slopes_upper
+    )
+    segment_results$Percent_Change_Per_Year <- paste0(
+      sprintf("%.1f%%", (selected$slopes - 1) * 100),
+      " (",
+      sprintf("%.1f%%", (selected$slopes_lower - 1) * 100),
+      " to ",
+      sprintf("%.1f%%", (selected$slopes_upper - 1) * 100),
+      ")"
+    )
+    segment_results$Interpretation <- ifelse(
+      selected$slopes > 1, "Increasing",
+      ifelse(selected$slopes < 1, "Decreasing", "Stable")
+    )
+    segment_results$Significant <- ifelse(
+      (selected$slopes_lower > 1) | (selected$slopes_upper < 1),
+      "Yes", "No"
+    )
+        # Wald tests for slope change between adjacent segments
+    wald_results <- if (!is.null(selected$wald_slope_change)) {
+      selected$wald_slope_change
+    } else {
+      data.frame(
+        Joinpoint = integer(0), Term = character(0),
+        Estimate = numeric(0), SE = numeric(0), z = numeric(0),
+        p_value = numeric(0), JP_Time = numeric(0),
+        JP_Time_Month = character(0), Exp_Estimate = numeric(0)
+      )
+    }
+    wald_results$Significant <- ifelse(wald_results$p_value < 0.05, "Yes", "No")
+    
+  }
+
+  # 5) BIC table of all candidates
+  bic_table <- if (!is.null(selected$all_bic)) selected$all_bic else data.frame(Joinpoints = 0, BIC = BIC(overall_trend_model))
+  # 6) Create overall summary with AAPC
+overall_summary <- if (selected_k == 0) {
+  data.frame(
+    Population = "Overall",
+    Average_APC = overall_results$coeff,
+    Lower_CI = overall_results$interval[1],
+    Upper_CI = overall_results$interval[2],
+    Average_Percent_Change = sprintf("%.1f%% (%.1f%% to %.1f%%)",
+      (overall_results$coeff - 1) * 100,
+      (overall_results$interval[1] - 1) * 100,
+      (overall_results$interval[2] - 1) * 100
+    ),
+    stringsAsFactors = FALSE
+  )
+} else {
+  data.frame(
+    Population = "Overall",
+    Average_APC = selected$aapc$est,
+    Lower_CI = selected$aapc$lo,
+    Upper_CI = selected$aapc$up,
+    Average_Percent_Change = sprintf("%.1f%% (%.1f%% to %.1f%%)",
+      (selected$aapc$est - 1) * 100,
+      (selected$aapc$lo - 1) * 100,
+      (selected$aapc$up - 1) * 100
+    ),
+    stringsAsFactors = FALSE
+  )
+}
+  # 7) Return
+  list(
+    overall_results = overall_results,
+    selected_k = selected_k,
+    segmented_model = if (selected_k == 0) NULL else selected,
+    segment_plot = segment_plot_result,
+    change_points = change_points_table,
+    segment_results = segment_results,
+    overall_summary = overall_summary,
+    bic_candidates = bic_table,
+    wald_adjacent_slopes = if (selected_k == 0) NULL else wald_results
+
+  )
+}
+
+#### # Example usage of the functions above ####
+#### All notifications ####
 # First, run analyze_overall_trend to get the data and overall trend
- overall_results <- analyze_overall_trend(
-   data = hiv_data,
-   start_year = 2001,
-   end_year = 2024,
-   count_period = "monthly",
-   include_overseas = FALSE,
-   type = "poisson",
-   save_plots = TRUE,
-   output_dir = figFolder,
-   plot_name_prefix = "hiv_trend_all"
- )
+# overall_results <- analyze_overall_trend(
+#   data = hiv_data,
+#   start_year = 2001,
+#   end_year = 2024,
+#   count_period = "monthly",
+#   include_overseas = FALSE,
+#   family_type  = "NB",
+#   save_plots = TRUE,
+#   output_dir = figFolder,
+#   plot_name_prefix = "hiv_trend_all"
+# )
  
  # Then extract needed data
- trend_data <- overall_results$trend_data
- overall_trend_model <- overall_results$overall_trend$model
- data_years <- unique(floor(trend_data$time))
+# trend_data <- overall_results$trend_data
+# overall_trend_model <- overall_results$overall_trend$model
+# data_years <- unique(floor(trend_data$time))
  
  # Use the fixed functions for segmented analysis
- segmented_model <- find_best_segment_model_fixed(
-   model = overall_trend_model, 
-   data_years = data_years,
-   num_changes = 4
- )
+# segmented_model <- find_best_segment_model_fixed(
+#   model = overall_trend_model, 
+#   data_years = data_years,
+#   num_changes = 3
+# )
 
-segment_plot_result <- segment_plot_fixed(
-   trend_data = trend_data,
-   trend_model = segmented_model,
-   count_period = "monthly",
-   overall_plot = TRUE,
-   overall_model = overall_trend_model,
-   segment_plot = TRUE,
-   y_upper = 150,    # Set y-axis upper limit
-   y_break = 50      # Set y-axis breaks every 50
-) 
+#segment_plot_result <- segment_plot_fixed(
+#   trend_data = trend_data,
+#   trend_model = segmented_model,
+#   count_period = "monthly",
+#   overall_plot = TRUE,
+#   overall_model = overall_trend_model,
+#   segment_plot = TRUE,
+#   y_upper = 150,    # Set y-axis upper limit
+#   y_break = 50      # Set y-axis breaks every 50
+#) 
 
 segmented_results <- analyze_segmented_trend_complete(
   data = hiv_data,
@@ -2214,107 +2217,74 @@ segmented_results <- analyze_segmented_trend_complete(
   end_year = 2024,
   count_period = "monthly",
   include_overseas = FALSE,
-  type = "poisson",
-  num_changes = 4,
+  family_type  = "NB",
+  num_changes = 5,
+  main_title = "",
+  sub_title = "A. HIV notifications with a first ever diagnosis in Australia, 2001-2024",
   show_overall = FALSE,  # Don't show overall trend
   show_segment = TRUE,   # Don't show segmented trends,
   y_upper = 150,    # Set y-axis upper limit
   y_break = 50      # Set y-axis breaks every 50
 )
 
-segmented_results$overall_results$overall_plot
+
 segmented_results$segment_results
 segmented_results$segment_plot
+segmented_results$overall_results
+segmented_results$bic_candidates
 segmented_results$change_points
+segmented_results$wald_adjacent_slopes
 
 
 #### Previously diagnosed overseas ####
-# First, run analyze_overall_trend to get the data and overall trend
- overall_results <- analyze_overall_trend(
-   data = hiv_data,
-   start_year = 2001,
-   end_year = 2024,
-   count_period = "monthly",
-   include_overseas = TRUE,
-   type = "poisson",
-   save_plots = TRUE,
-   output_dir = figFolder,
-   plot_name_prefix = "hiv_trend_all"
- )
- 
- # Then extract needed data
- trend_data <- overall_results$trend_data
- overall_trend_model <- overall_results$overall_trend$model
- data_years <- unique(floor(trend_data$time))
- 
- # Use the fixed functions for segmented analysis
- segmented_model <- find_best_segment_model_fixed(
-   model = overall_trend_model, 
-   data_years = data_years,
-   num_changes = 3
- )
-
-segment_plot_result <- segment_plot_fixed(
-   trend_data = trend_data,
-   trend_model = segmented_model,
-   count_period = "monthly",
-   overall_plot = TRUE,
-   overall_model = overall_trend_model,
-   segment_plot = TRUE
-) 
-
 PDO_segmented_results <- analyze_segmented_trend_complete(
   data = hiv_data,
   start_year = 2001,
   end_year = 2024,
   count_period = "monthly",
   include_overseas = TRUE,
-  type = "poisson",
-  num_changes = 3,
-  show_overall = TRUE,  # Don't show overall trend
+  family_type = "NB",
+  main_title = "",
+  sub_title = "B. HIV notifications previously diagnosed overseas, 2001-2024",
+  num_changes = 5,
+  show_overall = FALSE,  # Don't show overall trend
   show_segment = TRUE   # Don't show segmented trends
 )
 
-PDO_segmented_results$overall_results$overall_plot
+
+PDO_segmented_results$segment_results
 PDO_segmented_results$segment_plot
+PDO_segmented_results$overall_results
+PDO_segmented_results$bic_candidates
 PDO_segmented_results$change_points
+PDO_segmented_results$wald_adjacent_slopes
+
+#### Combined plot (first time diagnosed in Australia vs previously diagnosed overseas) ####
+library(grid)
+library(gtable)
+library(patchwork)
+FED_PDO_segment_plot <- (
+  wrap_plots(
+    segmented_results$segment_plot,
+    PDO_segmented_results$segment_plot,
+    nrow = 2
+  ) + plot_layout(guides = "collect")
+) & theme(legend.position = "bottom")
+
+#### Save figures ####
+SaveFigure <- function(folder, filename, figure, 
+    format = ".png", width = 30, 
+    height = 20, units = "cm", dpi = 600,...) {
+    ggsave(file.path(folder, paste(filename, format, sep = "")), 
+      plot = figure, width = width, height = height, units = units,dpi=dpi, ...)
+}
+# If figure not already created make sure it is not overwritten
+if (!file.exists(file.path(figFolder, "FED_PDO_segment_plot_2001_2024_20251006.png"))) {
+  SaveFigure(figFolder,"FED_PDO_segment_plot_2001_2024_20251006", FED_PDO_segment_plot)
+}
+
 
 #### Australian born ####
-# First, run analyze_overall_trend to get the data and overall trend
- overall_results <- analyze_overall_trend(
-   data = hiv_data,
-   start_year = 2001,
-   end_year = 2024,
-   count_period = "monthly",
-   include_overseas = FALSE,
-   au_birth_filter = "Australia",
-   type = "poisson",
-   save_plots = TRUE,
-   output_dir = figFolder,
-   plot_name_prefix = "hiv_trend_all"
- )
- 
- # Then extract needed data
- trend_data <- overall_results$trend_data
- overall_trend_model <- overall_results$overall_trend$model
- data_years <- unique(floor(trend_data$time))
- 
- # Use the fixed functions for segmented analysis
- segmented_model <- find_best_segment_model_fixed(
-   model = overall_trend_model, 
-   data_years = data_years,
-   num_changes = 3
- )
-
-segment_plot_result <- segment_plot_fixed(
-   trend_data = trend_data,
-   trend_model = segmented_model,
-   count_period = "monthly",
-   overall_plot = TRUE,
-   overall_model = overall_trend_model,
-   segment_plot = TRUE
-) 
-
 AB_segmented_results <- analyze_segmented_trend_complete(
   data = hiv_data,
   start_year = 2001,
@@ -2322,52 +2292,22 @@ AB_segmented_results <- analyze_segmented_trend_complete(
   count_period = "monthly",
   include_overseas = FALSE,
   au_birth_filter = "Australia",
-  type = "poisson",
-  num_changes = 3,
-  show_overall = TRUE,  # Don't show overall trend
+  main_title = "",
+  sub_title = "A. HIV notifications, Australian-born, 2001-2024",
+  family_type = "NB",
+  num_changes = 5,
+  show_overall = FALSE,  # Don't show overall trend
   show_segment = TRUE   # Don't show segmented trends
 )
 
-AB_segmented_results$overall_results$overall_plot
+AB_segmented_results$segment_results
 AB_segmented_results$segment_plot
+AB_segmented_results$overall_results
+AB_segmented_results$bic_candidates
 AB_segmented_results$change_points
+AB_segmented_results$wald_adjacent_slopes
 
 #### Overseas born ####
-# First, run analyze_overall_trend to get the data and overall trend
- overall_results <- analyze_overall_trend(
-   data = hiv_data,
-   start_year = 2001,
-   end_year = 2024,
-   count_period = "monthly",
-   include_overseas = FALSE,
-   au_birth_filter = "Overseas",
-   type = "poisson",
-   save_plots = TRUE,
-   output_dir = figFolder,
-   plot_name_prefix = "hiv_trend_all"
- )
- 
- # Then extract needed data
- trend_data <- overall_results$trend_data
- overall_trend_model <- overall_results$overall_trend$model
- data_years <- unique(floor(trend_data$time))
- 
- # Use the fixed functions for segmented analysis
- segmented_model <- find_best_segment_model_fixed(
-   model = overall_trend_model, 
-   data_years = data_years,
-   num_changes = 3
- )
-
-segment_plot_result <- segment_plot_fixed(
-   trend_data = trend_data,
-   trend_model = segmented_model,
-   count_period = "monthly",
-   overall_plot = TRUE,
-   overall_model = overall_trend_model,
-   segment_plot = TRUE
-) 
-
 OB_segmented_results <- analyze_segmented_trend_complete(
   data = hiv_data,
   start_year = 2001,
@@ -2375,54 +2315,22 @@ OB_segmented_results <- analyze_segmented_trend_complete(
   count_period = "monthly",
   include_overseas = FALSE,
   au_birth_filter = "Overseas",
-  type = "poisson",
-  num_changes = 3,
-  show_overall = TRUE,  # Don't show overall trend
+  main_title = "",
+  sub_title = "B. HIV notifications, Overseas-born, 2001-2024",
+  family_type = "NB",
+  num_changes = 5,
+  show_overall = FALSE,  # Don't show overall trend
   show_segment = TRUE   # Don't show segmented trends
 )
 
-OB_segmented_results$overall_results$overall_plot
+OB_segmented_results$segment_results
 OB_segmented_results$segment_plot
+OB_segmented_results$overall_results
+OB_segmented_results$bic_candidates
 OB_segmented_results$change_points
+OB_segmented_results$wald_adjacent_slopes
 
 #### Australian born MSM ####
-# First, run analyze_overall_trend to get the data and overall trend
- overall_results <- analyze_overall_trend(
-   data = hiv_data,
-   start_year = 2001,
-   end_year = 2024,
-   count_period = "monthly",
-   include_overseas = FALSE,
-   au_birth_filter = "Australia",
-      exposure_filter = c("MSM", "MSMIDU"),
-
-   type = "poisson",
-   save_plots = TRUE,
-   output_dir = figFolder,
-   plot_name_prefix = "hiv_trend_all"
- )
- 
- # Then extract needed data
- trend_data <- overall_results$trend_data
- overall_trend_model <- overall_results$overall_trend$model
- data_years <- unique(floor(trend_data$time))
- 
- # Use the fixed functions for segmented analysis
- segmented_model <- find_best_segment_model_fixed(
-   model = overall_trend_model, 
-   data_years = data_years,
-   num_changes = 3
- )
-
-segment_plot_result <- segment_plot_fixed(
-   trend_data = trend_data,
-   trend_model = segmented_model,
-   count_period = "monthly",
-   overall_plot = TRUE,
-   overall_model = overall_trend_model,
-   segment_plot = TRUE
-) 
-
 AB_MSM_segmented_results <- analyze_segmented_trend_complete(
   data = hiv_data,
   start_year = 2001,
@@ -2431,54 +2339,22 @@ AB_MSM_segmented_results <- analyze_segmented_trend_complete(
   include_overseas = FALSE,
   au_birth_filter = "Australia",
   exposure_filter = c("MSM", "MSMIDU"),
-  type = "poisson",
-  num_changes = 3,
-  show_overall = TRUE,  # Don't show overall trend
+  main_title = "",
+  sub_title = "E. HIV notifications, Australian-born MSM, 2001-2024",
+  family_type = "NB",
+  num_changes = 5,
+  show_overall = FALSE,  # Don't show overall trend
   show_segment = TRUE   # Don't show segmented trends
 )
 
-AB_MSM_segmented_results$overall_results$overall_plot
-AB_MSM_segmented_results$segment_plot
 AB_MSM_segmented_results$segment_results
+AB_MSM_segmented_results$segment_plot
+AB_MSM_segmented_results$overall_results
+AB_MSM_segmented_results$bic_candidates
 AB_MSM_segmented_results$change_points
+AB_MSM_segmented_results$wald_adjacent_slopes
 
 #### Overseas born MSM####
-# First, run analyze_overall_trend to get the data and overall trend
- overall_results <- analyze_overall_trend(
-   data = hiv_data,
-   start_year = 2001,
-   end_year = 2024,
-   count_period = "monthly",
-   include_overseas = FALSE,
-   au_birth_filter = "Overseas",
-   exposure_filter = c("MSM", "MSMIDU"),
-   type = "poisson",
-   save_plots = TRUE,
-   output_dir = figFolder,
-   plot_name_prefix = "hiv_trend_all"
- )
- 
- # Then extract needed data
- trend_data <- overall_results$trend_data
- overall_trend_model <- overall_results$overall_trend$model
- data_years <- unique(floor(trend_data$time))
- 
- # Use the fixed functions for segmented analysis
- segmented_model <- find_best_segment_model_fixed(
-   model = overall_trend_model, 
-   data_years = data_years,
-   num_changes = 3
- )
-
-segment_plot_result <- segment_plot_fixed(
-   trend_data = trend_data,
-   trend_model = segmented_model,
-   count_period = "monthly",
-   overall_plot = TRUE,
-   overall_model = overall_trend_model,
-   segment_plot = TRUE
-) 
-
 OB_MSM_segmented_results <- analyze_segmented_trend_complete(
   data = hiv_data,
   start_year = 2001,
@@ -2487,52 +2363,22 @@ OB_MSM_segmented_results <- analyze_segmented_trend_complete(
   include_overseas = FALSE,
   au_birth_filter = "Overseas",
   exposure_filter = c("MSM", "MSMIDU"),
-  type = "poisson",
-  num_changes = 3,
-  show_overall = TRUE,  # Don't show overall trend
+  main_title = "",
+  sub_title = "F. HIV notifications, Overseas-born MSM, 2001-2024",
+  family_type = "NB",
+  num_changes = 5,
+  show_overall = FALSE,  # Don't show overall trend
   show_segment = TRUE   # Don't show segmented trends
 )
 
-OB_MSM_segmented_results$overall_results$overall_plot
+OB_MSM_segmented_results$segment_results
 OB_MSM_segmented_results$segment_plot
+OB_MSM_segmented_results$overall_results
+OB_MSM_segmented_results$bic_candidates
 OB_MSM_segmented_results$change_points
+OB_MSM_segmented_results$wald_adjacent_slopes
 
 #### MSM ####
-# First, run analyze_overall_trend to get the data and overall trend
-overall_results <- analyze_overall_trend(
-   data = hiv_data,
-   start_year = 2001,
-   end_year = 2024,
-   count_period = "monthly",
-   include_overseas = FALSE,
-   exposure_filter = c("MSM", "MSMIDU"),
-   type = "poisson",
-   save_plots = TRUE,
-   output_dir = figFolder,
-   plot_name_prefix = "hiv_trend_all"
- )
- 
- # Then extract needed data
- trend_data <- overall_results$trend_data
- overall_trend_model <- overall_results$overall_trend$model
- data_years <- unique(floor(trend_data$time))
- 
- # Use the fixed functions for segmented analysis
- segmented_model <- find_best_segment_model_fixed(
-   model = overall_trend_model, 
-   data_years = data_years,
-   num_changes = 2
- )
-
-segment_plot_result <- segment_plot_fixed(
-   trend_data = trend_data,
-   trend_model = segmented_model,
-   count_period = "monthly",
-   overall_plot = TRUE,
-   overall_model = overall_trend_model,
-   segment_plot = TRUE
-) 
-
 MSM_segmented_results <- analyze_segmented_trend_complete(
   data = hiv_data,
   start_year = 2001,
@@ -2540,52 +2386,22 @@ MSM_segmented_results <- analyze_segmented_trend_complete(
   count_period = "monthly",
   include_overseas = FALSE,
   exposure_filter = c("MSM", "MSMIDU"),
-  type = "poisson",
-  num_changes = 2,
-  show_overall = TRUE,  # Don't show overall trend
+  main_title = "",
+  sub_title = "C. HIV notifications, MSM, 2001-2024",
+  family_type = "NB",
+  num_changes = 5,
+  show_overall = FALSE,  # Don't show overall trend
   show_segment = TRUE   # Don't show segmented trends
 )
 
-MSM_segmented_results$overall_results$overall_plot
+MSM_segmented_results$segment_results
 MSM_segmented_results$segment_plot
+MSM_segmented_results$overall_results
+MSM_segmented_results$bic_candidates
 MSM_segmented_results$change_points
+MSM_segmented_results$wald_adjacent_slopes
 
 #### Hetero ####
-# First, run analyze_overall_trend to get the data and overall trend
-overall_results <- analyze_overall_trend(
-   data = hiv_data,
-   start_year = 2001,
-   end_year = 2024,
-   count_period = "monthly",
-   include_overseas = FALSE,
-   exposure_filter = c("Hetero"),
-   type = "poisson",
-   save_plots = TRUE,
-   output_dir = figFolder,
-   plot_name_prefix = "hiv_trend_all"
- )
- 
- # Then extract needed data
- trend_data <- overall_results$trend_data
- overall_trend_model <- overall_results$overall_trend$model
- data_years <- unique(floor(trend_data$time))
- 
- # Use the fixed functions for segmented analysis
- segmented_model <- find_best_segment_model_fixed(
-   model = overall_trend_model, 
-   data_years = data_years,
-   num_changes = 2
- )
-
-segment_plot_result <- segment_plot_fixed(
-   trend_data = trend_data,
-   trend_model = segmented_model,
-   count_period = "monthly",
-   overall_plot = TRUE,
-   overall_model = overall_trend_model,
-   segment_plot = TRUE
-) 
-
 Hetero_segmented_results <- analyze_segmented_trend_complete(
   data = hiv_data,
   start_year = 2001,
@@ -2593,54 +2409,23 @@ Hetero_segmented_results <- analyze_segmented_trend_complete(
   count_period = "monthly",
   include_overseas = FALSE,
   exposure_filter = c("Hetero"),
-  type = "poisson",
-  num_changes = 2,
-  show_overall = TRUE,  # Don't show overall trend
+  main_title = "",
+  sub_title = "D. HIV notifications, Heterosexual, 2001-2024",
+  family_type = "NB",
+  num_changes = 5,
+  show_overall = FALSE,  # Don't show overall trend
   show_segment = TRUE   # Don't show segmented trends
 )
 
-Hetero_segmented_results$overall_results$overall_plot
+Hetero_segmented_results$segment_results
 Hetero_segmented_results$segment_plot
+Hetero_segmented_results$overall_results
+Hetero_segmented_results$bic_candidates
 Hetero_segmented_results$change_points
+Hetero_segmented_results$wald_adjacent_slopes
 
 
 #### Hetero Male ####
-# First, run analyze_overall_trend to get the data and overall trend
-overall_results <- analyze_overall_trend(
-   data = hiv_data,
-   start_year = 2001,
-   end_year = 2024,
-   count_period = "monthly",
-   include_overseas = FALSE,
-   exposure_filter = c("Hetero"),
-   gender_filter = "Male",
-   type = "poisson",
-   save_plots = TRUE,
-   output_dir = figFolder,
-   plot_name_prefix = "hiv_trend_all"
- )
- 
- # Then extract needed data
- trend_data <- overall_results$trend_data
- overall_trend_model <- overall_results$overall_trend$model
- data_years <- unique(floor(trend_data$time))
- 
- # Use the fixed functions for segmented analysis
- segmented_model <- find_best_segment_model_fixed(
-   model = overall_trend_model, 
-   data_years = data_years,
-   num_changes = 3
- )
-
-segment_plot_result <- segment_plot_fixed(
-   trend_data = trend_data,
-   trend_model = segmented_model,
-   count_period = "monthly",
-   overall_plot = TRUE,
-   overall_model = overall_trend_model,
-   segment_plot = TRUE
-) 
-
 Hetero_Male_segmented_results <- analyze_segmented_trend_complete(
   data = hiv_data,
   start_year = 2001,
@@ -2648,53 +2433,23 @@ Hetero_Male_segmented_results <- analyze_segmented_trend_complete(
   count_period = "monthly",
   include_overseas = FALSE,
   exposure_filter = c("Hetero"),
+  main_title = "",
+  sub_title = "G. HIV notifications, Heterosexual men, 2001-2024",
   gender_filter = "Male",
-  type = "poisson",
-  num_changes = 3,
-  show_overall = TRUE,  # Don't show overall trend
+  family_type = "NB",
+  num_changes = 5,
+  show_overall = FALSE,  # Don't show overall trend
   show_segment = TRUE   # Don't show segmented trends
 )
 
-Hetero_Male_segmented_results$overall_results$overall_plot
+Hetero_Male_segmented_results$segment_results
 Hetero_Male_segmented_results$segment_plot
+Hetero_Male_segmented_results$overall_results
+Hetero_Male_segmented_results$bic_candidates
 Hetero_Male_segmented_results$change_points
+Hetero_Male_segmented_results$wald_adjacent_slopes
 
 #### Female ####
-# First, run analyze_overall_trend to get the data and overall trend
-overall_results <- analyze_overall_trend(
-   data = hiv_data,
-   start_year = 2001,
-   end_year = 2024,
-   count_period = "monthly",
-   include_overseas = FALSE,
-   gender_filter = "Female",
-   type = "poisson",
-   save_plots = TRUE,
-   output_dir = figFolder,
-   plot_name_prefix = "hiv_trend_all"
- )
- 
- # Then extract needed data
- trend_data <- overall_results$trend_data
- overall_trend_model <- overall_results$overall_trend$model
- data_years <- unique(floor(trend_data$time))
- 
- # Use the fixed functions for segmented analysis
- segmented_model <- find_best_segment_model_fixed(
-   model = overall_trend_model, 
-   data_years = data_years,
-   num_changes = 3
- )
-
-segment_plot_result <- segment_plot_fixed(
-   trend_data = trend_data,
-   trend_model = segmented_model,
-   count_period = "monthly",
-   overall_plot = TRUE,
-   overall_model = overall_trend_model,
-   segment_plot = TRUE
-) 
-
 Female_segmented_results <- analyze_segmented_trend_complete(
   data = hiv_data,
   start_year = 2001,
@@ -2702,24 +2457,50 @@ Female_segmented_results <- analyze_segmented_trend_complete(
   count_period = "monthly",
   include_overseas = FALSE,
   gender_filter = "Female",
-  type = "poisson",
-  num_changes = 3,
-  show_overall = TRUE,  # Don't show overall trend
+  main_title = "",
+  sub_title = "H. HIV notifications, Women, 2001-2024",
+  family_type = "NB",
+  num_changes = 5,
+  show_overall = FALSE,  # Don't show overall trend
   show_segment = TRUE   # Don't show segmented trends
 )
 
-Female_segmented_results$overall_results$overall_plot
+Female_segmented_results$segment_results
 Female_segmented_results$segment_plot
+Female_segmented_results$overall_results
+Female_segmented_results$bic_candidates
 Female_segmented_results$change_points
+Female_segmented_results$wald_adjacent_slopes
+
+
+#### Combined plot (first time diagnosed in Australia vs previously diagnosed overseas) ####
+Sub_group_segment_plot <- (
+  wrap_plots(
+    AB_segmented_results$segment_plot,
+    OB_segmented_results$segment_plot,
+    MSM_segmented_results$segment_plot,
+    Hetero_segmented_results$segment_plot,
+    AB_MSM_segmented_results$segment_plot,
+    OB_MSM_segmented_results$segment_plot,
+    Hetero_Male_segmented_results$segment_plot,
+    Female_segmented_results$segment_plot,
+    nrow = 4
+  ) + plot_layout(guides = "collect")
+) & theme(legend.position = "bottom")
 
 #### Save figures ####
 SaveFigure <- function(folder, filename, figure, 
-    format = ".png", width = 25, 
-    height = 12.5, units = "cm", dpi = 600,...) {
+    format = ".png", width = 45, 
+    height = 30, units = "cm", dpi = 600,...) {
     ggsave(file.path(folder, paste(filename, format, sep = "")), 
       plot = figure, width = width, height = height, units = units,dpi=dpi, ...)
 }
+
 # If figure not already created make sure it is not overwritten
+if (!file.exists(file.path(figFolder, "Sub_group_segment_plot_2001_2024_202510062.png"))) {
+  SaveFigure(figFolder,"Sub_group_segment_plot_2001_2024_20251006", Sub_group_segment_plot)
+}
+
 if (!file.exists(file.path(figFolder, "overall_trend_plot_20250702.png"))) {
   SaveFigure(figFolder,"overall_trend_plot_20250409", segmented_results$overall_results$overall_plot)
 }
@@ -2758,6 +2539,154 @@ if (!file.exists(file.path(figFolder, "Hetero_changing_point_plot_20250910.png")
 
 
 #### Export results to CSV files ####
+# Function to combine results across populations
+combine_segmented_results <- function(results_list, population_labels) {
+  
+  # 1. Combine segment_results
+  segment_combined <- do.call(rbind, lapply(seq_along(results_list), function(i) {
+    df <- results_list[[i]]$segment_results
+    if (!is.null(df) && nrow(df) > 0) {
+      df$Population <- population_labels[i]
+      df
+    } else {
+      NULL
+    }
+  }))
+  
+  # Reorder columns to put Population first
+  if (!is.null(segment_combined)) {
+    segment_combined <- segment_combined[, c("Population", setdiff(names(segment_combined), "Population"))]
+  }
+  
+  # 2. Combine bic_candidates
+  bic_combined <- do.call(rbind, lapply(seq_along(results_list), function(i) {
+    df <- results_list[[i]]$bic_candidates
+    if (!is.null(df) && nrow(df) > 0) {
+      df$Population <- population_labels[i]
+      df
+    } else {
+      NULL
+    }
+  }))
+  
+  if (!is.null(bic_combined)) {
+    bic_combined <- bic_combined[, c("Population", setdiff(names(bic_combined), "Population"))]
+  }
+  
+  # 3. Combine change_points
+  change_points_combined <- do.call(rbind, lapply(seq_along(results_list), function(i) {
+    df <- results_list[[i]]$change_points
+    if (!is.null(df) && nrow(df) > 0) {
+      df$Population <- population_labels[i]
+      df
+    } else {
+      NULL
+    }
+  }))
+  
+  if (!is.null(change_points_combined)) {
+    change_points_combined <- change_points_combined[, c("Population", setdiff(names(change_points_combined), "Population"))]
+  }
+  
+  # 4. Combine wald_adjacent_slopes
+  wald_combined <- do.call(rbind, lapply(seq_along(results_list), function(i) {
+    df <- results_list[[i]]$wald_adjacent_slopes
+    if (!is.null(df) && nrow(df) > 0) {
+      df$Population <- population_labels[i]
+      df
+    } else {
+      NULL
+    }
+  }))
+  
+  if (!is.null(wald_combined)) {
+    wald_combined <- wald_combined[, c("Population", setdiff(names(wald_combined), "Population"))]
+  }
+  
+  # 5. Combine overall_summary (AAPC)
+  overall_summary_combined <- do.call(rbind, lapply(seq_along(results_list), function(i) {
+    df <- results_list[[i]]$overall_summary
+    if (!is.null(df) && nrow(df) > 0) {
+      df$Population <- population_labels[i]
+      df[, c("Population", setdiff(names(df), "Population"))]
+    } else {
+      NULL
+    }
+  }))
+  
+  return(list(
+    segment_results = segment_combined,
+    bic_candidates = bic_combined,
+    change_points = change_points_combined,
+    wald_adjacent_slopes = wald_combined,
+    overall_summary = overall_summary_combined
+  ))
+}
+
+# Create list of all your results
+all_results <- list(
+  segmented_results,
+  PDO_segmented_results,
+  AB_segmented_results,
+  OB_segmented_results,
+  AB_MSM_segmented_results,
+  OB_MSM_segmented_results,
+  MSM_segmented_results,
+  Hetero_segmented_results,
+  Hetero_Male_segmented_results,
+  Female_segmented_results
+)
+
+# Create corresponding population labels
+population_labels <- c(
+  "All (First diagnosed in Australia)",
+  "Previously diagnosed overseas",
+  "Australian-born",
+  "Overseas-born",
+  "Australian-born MSM",
+  "Overseas-born MSM",
+  "MSM",
+  "Heterosexual",
+  "Heterosexual men",
+  "Women"
+)
+
+# Combine all results
+combined_results <- combine_segmented_results(all_results, population_labels)
+
+# Access the combined datasets
+combined_results$segment_results
+combined_results$bic_candidates
+combined_results$change_points
+combined_results$wald_adjacent_slopes
+combined_results$overall_summary
+
+
+# If file not already created make sure it is not overwritten
+if (!file.exists(file.path(resultsFolder, "combined_each_slope_results_20251006.csv"))) {
+write.csv(combined_results$segment_results, file.path(resultsFolder, "combined_each_slope_results_20251006.csv"), row.names=TRUE)
+}
+if (!file.exists(file.path(resultsFolder, "combined_aapc_each_results_20251006.csv"))) {
+write.csv(combined_results$overall_summary, file.path(resultsFolder, "combined_aapc_each_results_20251006.csv"), row.names=TRUE)
+}
+if (!file.exists(file.path(resultsFolder, "combined_bic_results_20251006.csv"))) {
+write.csv(combined_results$bic_candidates, file.path(resultsFolder, "combined_bic_results_20251006.csv"), row.names=TRUE)
+}
+if (!file.exists(file.path(resultsFolder, "combined_change_points_results_20251006.csv"))) {
+write.csv(combined_results$change_points, file.path(resultsFolder, "combined_change_points_results_20251006.csv"), row.names=TRUE)
+}
+if (!file.exists(file.path(resultsFolder, "combined_wald_adjacent_slopes_results_20251006.csv"))) {
+write.csv(combined_results$wald_adjacent_slopes, file.path(resultsFolder, "combined_wald_adjacent_slopes_results_20251006.csv"), row.names=TRUE)
+}
+
+
+
+
+
+
+
+
+
 # Export all tables from segmented_results to CSV files
 
 # Create results directory if it doesn't exist
@@ -2921,7 +2850,7 @@ hiv_data_filtered <- hiv_data %>%
     year_diag <= 2024,
     !is.na(phn_res),
     !is.na(year_diag),
-    previ_diag_overseas == 0 # advanced_hiv_diag_flag cd4_50_hiv_diag_flag late_hiv_diag_flag previ_diag_overseas
+    late_hiv_diag_flag == 1 # advanced_hiv_diag_flag cd4_50_hiv_diag_flag late_hiv_diag_flag previ_diag_overseas
   )
 # Further filter to include only australian borns if needed
 #hiv_data_filtered <- hiv_data_filtered %>%
@@ -2987,7 +2916,7 @@ hiv_case_rates <- phn_pop_yearly %>%
   filter(total_pop > 0)
 
 hiv_heatmap_df <- hiv_case_rates %>%
-  select(PHN_NAME = PHN_NAME, year, case_rate = case_rate_per_100k)
+  dplyr::select(PHN_NAME, year, case_rate = case_rate_per_100k)
 
 # Create log-transformed case rate
 hiv_heatmap_df$case_rate_log <- log10(hiv_heatmap_df$case_rate + 1)
@@ -3026,7 +2955,7 @@ p_timeseries_phn_2001_24_20250901_gradient <- ggplot(hiv_heatmap_df, aes(x = yea
   ) +
   labs(
     title = "HIV Notification Rates by Primary Health Network",
-    subtitle = "Newly diagnosed",
+    subtitle = "Late HIV diagnoses",
     x = "Year",
     y = "Primary Health Network"
   ) +
@@ -3039,8 +2968,8 @@ p_timeseries_phn_2001_24_20250901_gradient <- ggplot(hiv_heatmap_df, aes(x = yea
 # Display the plot
 print(p_timeseries_phn_2001_24_20250901_gradient)
 
-if (!file.exists(file.path(figFolder, "new_gradient_p_timeseries_phn_2001_24_20250902.png"))) {
-    SaveFigure(figFolder,"new_gradient_p_timeseries_phn_2001_24_20250902", p_timeseries_phn_2001_24_20250901_gradient)
+if (!file.exists(file.path(figFolder, "late_gradient_p_timeseries_phn_2001_24_20250926.png"))) {
+    SaveFigure(figFolder,"late_gradient_p_timeseries_phn_2001_24_20250926", p_timeseries_phn_2001_24_20250901_gradient)
 }
 
 ####save figure####
