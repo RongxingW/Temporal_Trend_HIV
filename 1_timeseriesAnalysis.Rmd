@@ -456,7 +456,7 @@ create_cd4_rainbow_plot <- function(data,
       panel.grid.major.y = element_line(color = "gray90"),
       panel.border = element_rect(fill = NA, color = "gray80"),
       plot.title = element_text(hjust = 0.5, face = "bold"),
-      plot.subtitle = element_text(hjust = 0.5),
+      plot.subtitle = element_text(hjust = 0),
       axis.text.x = element_text(angle = 0, hjust = 0.5),
       # Add proper margin for the x-axis labels with counts
       axis.text.x.bottom = element_text(margin = margin(t = 5, b = 5)),
@@ -478,12 +478,14 @@ rainbow_all <- create_cd4_rainbow_plot(
   data = hiv_data,
   start_year = 2001,
   end_year = 2024,
-  title = "CD4 Count at HIV Diagnosis by Year",
+  title = "",
+  subtitle = "A. Proportion of HIV diagnoses by CD4 count level, HIV notifications with a first ever diagnosis in Australia, 2001-2024",
   show_n = FALSE,  # Do not show sample size on x-axis
   previ_diag_overseas = FALSE,
   dash_line = FALSE
 )
 rainbow_all$summary_data_complete
+rainbow_all_percentage_plot <- rainbow_all$p + theme(legend.position = "none")
 print(rainbow_all)
 
 if (!file.exists(file.path(resultsFolder, "rainbow_plot_prop_20250926.csv"))) {
@@ -862,7 +864,7 @@ create_cd4_absolute_rainbow_plot <- function(data,
       panel.grid.major.y = element_line(color = "gray90"),
       panel.border = element_rect(fill = NA, color = "gray80"),
       plot.title = element_text(hjust = 0.5, face = "bold"),
-      plot.subtitle = element_text(hjust = 0.5),
+      plot.subtitle = element_text(hjust = 0),
       axis.text.x = element_text(angle = 0, hjust = 0.5),
       # Add proper margin for the x-axis labels with counts
       axis.text.x.bottom = element_text(margin = margin(t = 5, b = 5)),
@@ -882,7 +884,8 @@ absolute_rainbow_all <- create_cd4_absolute_rainbow_plot(
   data = hiv_data,
   start_year = 2001,
   end_year = 2024,
-  title = "CD4 Count Distribution at HIV Diagnosis by Year",
+  title = "",
+  subtitle = "B. Number of HIV diagnoses by CD4 count level, HIV notifications with a first ever diagnosis in Australia, 2001-2024",
   show_n = FALSE,  # Do not show sample size on x-axis
   previ_diag_overseas = FALSE,  # Do not include previously diagnosed overseas
   dash_line = FALSE
@@ -908,8 +911,28 @@ absolute_rainbow_msm <- create_cd4_rainbow_plot(
 )
 print(absolute_rainbow_msm)
 
+rainbow_all_percentage_plot <- rainbow_all$p + theme(legend.position = "none")
+rainbow_all_number_plot <- absolute_rainbow_all
+# Combine side by side (or adjust ncol/nrow as needed)
+library(patchwork)
+combined_number_percentage_plot <- 
+  (rainbow_all_percentage_plot + rainbow_all_number_plot) +
+  plot_layout(heights = c(1, 1))
+
+####save figure####
+SaveFigure <- function(folder, filename, figure, 
+    format = ".png", width = 40, 
+    height = 40, units = "cm", dpi = 600,...) {
+    ggsave(file.path(folder, paste(filename, format, sep = "")), 
+      plot = figure, width = width, height = height, units = units,dpi=dpi, ...)
+}
+
 
 # If figure not already created make sure it is not overwritten
+if (!file.exists(file.path(figFolder, "perNnumber_rainbow_all_noPDO_202510071.png"))) {
+    SaveFigure(figFolder,"perNnumber_rainbow_all_noPDO_20251007", combined_number_percentage_plot)
+}
+
 if (!file.exists(file.path(figFolder, "absolute_rainbow_all_noPDO_2025026.png"))) {
     SaveFigure(figFolder,"absolute_rainbow_all_noPDO_20250926", absolute_rainbow_all)
 }
@@ -1210,7 +1233,11 @@ get_trend_data <- function(data,
                            state_res_filter = NULL,      # state_res
                            phn_res_filter = NULL,        # phn_res
                            count_period = "monthly",     # "monthly", "quarterly", or "annually"
-                           include_overseas = FALSE) {    # Include previously diagnosed overseas
+                           late_diag_filter = NULL,      # late_hiv_diag_flag\
+                           advanced_diag_filter = NULL,       # advanced_hiv_diag_flag
+                           include_overseas = FALSE,
+                           CD4 = FALSE,                  # CD4 count at diagnosis available
+                           cd4_var = "cd4_count_diag") {    # Include previously diagnosed overseas
   
   # Clone the data to avoid modifying the original
   plot_data <- data %>% as.data.frame()
@@ -1281,6 +1308,18 @@ get_trend_data <- function(data,
       filter(phn_res == phn_res_filter)
   }
   
+  # late HIV diagnosis
+  if (!is.null(late_diag_filter)) {
+    plot_data <- plot_data %>% 
+      filter(late_hiv_diag_flag == late_diag_filter)
+  }
+  
+  # advanced HIV diagnosis
+  if (!is.null(advanced_diag_filter)) {
+    plot_data <- plot_data %>% 
+      filter(advanced_hiv_diag_flag == advanced_diag_filter)
+  }
+  
   # Filter by overseas diagnosis if specified
   if (!is.null(include_overseas)) {
     if (include_overseas == TRUE) {
@@ -1292,6 +1331,13 @@ get_trend_data <- function(data,
     }
   }
 
+    # If CD4 mode, keep only rows with CD4 available
+  if (CD4) {
+    if (!cd4_var %in% names(plot_data)) {
+      stop(sprintf("Variable '%s' not found in data.", cd4_var))
+    }
+    plot_data <- plot_data %>% filter(!is.na(.data[[cd4_var]]))
+  }
   
   # Check if we have data left after all the filtering
   if (nrow(plot_data) == 0) {
@@ -1309,12 +1355,18 @@ get_trend_data <- function(data,
       quarter = paste0(year_diag, "-Q", lubridate::quarter(month_date))
     )
   
-  # Aggregate data based on chosen period
+  # Helper: summariser depends on CD4 vs count
+  summarise_fun <- if (CD4) {
+    # use mean CD4 (keep output column named 'notifications' to avoid changing downstream code)
+    function(df) dplyr::summarise(df, notifications = mean(.data[[cd4_var]], na.rm = TRUE))
+  } else {
+    function(df) dplyr::summarise(df, notifications = dplyr::n())
+  }
+
   if (count_period == "monthly") {
     trend_data <- plot_data %>%
       group_by(month_hiv_diag) %>%
-      summarise(notifications = n()) %>%
-      # Create a time variable based on the month
+      summarise_fun() %>%
       mutate(
         month_date = as.Date(paste0(month_hiv_diag, "-01")),
         time = lubridate::decimal_date(month_date)
@@ -1326,13 +1378,11 @@ get_trend_data <- function(data,
   } else if (count_period == "quarterly") {
     trend_data <- plot_data %>%
       group_by(quarter) %>%
-      summarise(notifications = n()) %>%
-      # Extract year and quarter number
+      summarise_fun() %>%
       mutate(
         year = as.numeric(substr(quarter, 1, 4)),
         q_num = as.numeric(substr(quarter, 7, 7)),
-        # Convert to decimal time (year + fraction of year)
-        time = year + (q_num - 1) * 0.25 + 0.125  # Middle of quarter
+        time = year + (q_num - 1) * 0.25 + 0.125
       ) %>%
       dplyr::select(time, notifications) %>%
       mutate(period = "quarter") %>%
@@ -1341,7 +1391,7 @@ get_trend_data <- function(data,
   } else if (count_period == "annually") {
     trend_data <- plot_data %>%
       group_by(year_diag) %>%
-      summarise(notifications = n()) %>%
+      summarise_fun() %>%
       rename(time = year_diag) %>%
       mutate(period = "annual") %>%
       arrange(time) %>%
@@ -1349,15 +1399,154 @@ get_trend_data <- function(data,
   } else {
     stop("Unknown count period. Use 'monthly', 'quarterly', or 'annually'")
   }
-  
+
+  # Attach a small attribute so downstream knows we're in CD4 mode
+  attr(trend_data, "cd4_mode") <- CD4
   return(trend_data)
+}
+
+
+# Build period-level CD4 quantiles with the SAME filters
+get_cd4_quantile_trend_data <- function(
+  data,
+  start_year = NULL,
+  end_year = NULL,
+  exposure_filter = NULL,      # hiv_exposure_risk
+  gender_filter = NULL,        # gender (sex)
+  region_birth_filter = NULL,  # region_birth
+  au_birth_filter = NULL,      # au_birth
+  lang_home_filter = NULL,     # lang_home
+  place_acq_filter = NULL,     # place_acq
+  state_res_filter = NULL,     # state_res
+  phn_res_filter = NULL,       # phn_res
+  include_overseas = FALSE,    # previously diagnosed overseas
+  count_period = "monthly",    # "monthly", "quarterly", "annually"
+  cd4_var = "cd4_count_diag",
+  probs = c(0.05, 0.50, 0.95)
+) {
+  require(dplyr); require(lubridate); require(rlang)
+
+  plot_data <- data %>% as.data.frame()
+
+  # Derive year if missing
+  if (!"year_diag" %in% names(plot_data)) {
+    plot_data <- plot_data %>%
+      mutate(year_diag = as.numeric(substr(month_hiv_diag, 1, 4)))
+  }
+
+  # Year window
+  if (!is.null(start_year)) plot_data <- plot_data %>% filter(year_diag >= start_year)
+  if (!is.null(end_year))   plot_data <- plot_data %>% filter(year_diag <= end_year)
+
+  # Filters
+  if (!is.null(exposure_filter))    plot_data <- plot_data %>% filter(hiv_exposure_risk %in% exposure_filter)
+  if (!is.null(gender_filter))      plot_data <- plot_data %>% filter(sex == gender_filter)
+  if (!is.null(region_birth_filter))plot_data <- plot_data %>% filter(region_birth == region_birth_filter)
+  if (!is.null(au_birth_filter))    plot_data <- plot_data %>% filter(au_birth == au_birth_filter)
+  if (!is.null(lang_home_filter))   plot_data <- plot_data %>% filter(lang_home == lang_home_filter)
+  if (!is.null(place_acq_filter))   plot_data <- plot_data %>% filter(place_acq == place_acq_filter)
+  if (!is.null(state_res_filter))   plot_data <- plot_data %>% filter(state_res == state_res_filter)
+  if (!is.null(phn_res_filter))     plot_data <- plot_data %>% filter(phn_res == phn_res_filter)
+
+  # Overseas switch
+  if (!is.null(include_overseas)) {
+    if (include_overseas == TRUE)  plot_data <- plot_data %>% filter(previ_diag_overseas == 1)
+    if (include_overseas == FALSE) plot_data <- plot_data %>% filter(previ_diag_overseas == 0)
+  }
+
+  # Keep CD4 rows only
+  if (!cd4_var %in% names(plot_data)) stop(sprintf("Variable '%s' not found.", cd4_var))
+  plot_data <- plot_data %>% filter(!is.na(.data[[cd4_var]]))
+
+  if (nrow(plot_data) == 0) stop("No CD4 data remaining after filters.")
+
+  # Dates & quarter label
+  plot_data <- plot_data %>%
+    mutate(
+      month_date = as.Date(paste0(month_hiv_diag, "-01")),
+      quarter    = paste0(year_diag, "-Q", lubridate::quarter(month_date))
+    )
+
+  # Summariser
+  qfun <- function(x) as.numeric(stats::quantile(x, probs = probs, na.rm = TRUE))
+
+  if (count_period == "monthly") {
+    out <- plot_data %>%
+      group_by(month_hiv_diag) %>%
+      summarise(q = list(qfun(.data[[cd4_var]])), .groups = "drop") %>%
+      mutate(
+        month_date = as.Date(paste0(month_hiv_diag, "-01")),
+        time = lubridate::decimal_date(month_date)
+      )
+  } else if (count_period == "quarterly") {
+    out <- plot_data %>%
+      group_by(quarter) %>%
+      summarise(q = list(qfun(.data[[cd4_var]])), .groups = "drop") %>%
+      mutate(
+        year  = as.numeric(substr(quarter, 1, 4)),
+        q_num = as.numeric(substr(quarter, 7, 7)),
+        time = year + (q_num - 1) * 0.25 + 0.125
+      )
+  } else if (count_period == "annually") {
+    out <- plot_data %>%
+      group_by(year_diag) %>%
+      summarise(q = list(qfun(.data[[cd4_var]])), .groups = "drop") %>%
+      rename(time = year_diag)
+  } else {
+    stop("count_period must be 'monthly', 'quarterly', or 'annually'.")
+  }
+
+  # Unnest to wide (p05, p50, p95)
+  out <- out %>%
+    dplyr::mutate(
+      p05 = vapply(q, `[`, 1, FUN.VALUE = numeric(1)),
+      p50 = vapply(q, `[`, 2, FUN.VALUE = numeric(1)),
+      p95 = vapply(q, `[`, 3, FUN.VALUE = numeric(1))
+    ) %>%
+    dplyr::select(time, p05, p50, p95) %>%
+    dplyr::arrange(time)
+  
+  attr(out, "cd4_mode") <- TRUE
+  return(out)
 }
 
 
 # Fits the overall time trend using Poisson or Negative Binomial 
 # and reports the estimated change, confidence interval, and p-value.
 get_trend <- function(trend_data, family_type = "poisson") {
-  if (family_type %in% c("poisson", "POISSON")) {
+
+  # If trend_data came from CD4 mode, prefer gaussian
+  cd4_mode <- isTRUE(attr(trend_data, "cd4_mode"))
+  if (cd4_mode && tolower(family_type) %in% c("poisson","nb")) {
+    family_type <- "gaussian"
+  }
+
+  # --- Gaussian path (for CD4 averages) ---
+  if (tolower(family_type) %in% c("gaussian","linear","gauss")) {
+    gaus_model <- glm(
+      notifications ~ time,
+      data = trend_data,
+      family = gaussian(link = "identity"),
+      na.action = na.exclude,
+      model = TRUE, x = TRUE, y = TRUE
+    )
+    beta <- coef(gaus_model)["time"]
+    se   <- summary(gaus_model)$coefficients["time", "Std. Error"]
+    zcrit <- qnorm(0.975)
+    ci_lin <- c(beta - zcrit * se, beta + zcrit * se)
+    p_value <- 2 * pnorm(-abs(beta / se))
+
+    # For Gaussian, 'coeff' is the slope (Δ CD4 per year)
+    return(list(
+      model = gaus_model,
+      coeff = unname(beta),
+      interval = unname(ci_lin),
+      p_value = p_value,
+      type_used = "gaussian",
+      dispersion = NA_real_
+    ))
+  }
+    if (family_type %in% c("poisson", "POISSON")) {
     pois_model <- glm(
   notifications ~ time,
   data = trend_data,
@@ -1425,65 +1614,143 @@ get_trend <- function(trend_data, family_type = "poisson") {
 
 # Function for generating overall trend plot
 overall_trend_plot <- function(trend_data, trend_model, count_period = "monthly") {
-  
-  # Set up x-axis label
+  cd4_mode <- isTRUE(attr(trend_data, "cd4_mode"))
+
+  # x-axis label and breaks
   x_label_vec <- c("monthly" = "Year", "quarterly" = "Year", "annually" = "Year")
   x_label <- x_label_vec[count_period]
-  
-  # Set-up x-axis breaks
-  if (count_period == "monthly" || count_period == "quarterly") {
+
+  if (count_period %in% c("monthly", "quarterly")) {
     if (count_period == "monthly") {
-      # For monthly data, show only January of each year
       years <- unique(floor(trend_data$time))
-      xbreaks <- years + 0.0  # January of each year
+      xbreaks <- years + 0.0
       xlabels <- as.character(years)
     } else {
-      # For quarterly data, show every year
       xbreaks <- floor(min(trend_data$time)):ceiling(max(trend_data$time))
-      xlabels <- EveryNth(xbreaks, 1, inverse = FALSE)
+      xlabels <- xbreaks
     }
   } else {
-    # For annual data, show every year
     xbreaks <- unique(trend_data$time)
     xlabels <- xbreaks
   }
-  
-  # Create plot
-  trend_plot <- ggplot(data = trend_data, 
-                      aes(x = time, y = notifications)) +
-    geom_point(color = "#82afda") +
-    geom_line(aes(y = predict(trend_model, type = "response")), 
-             colour =  "#82afda"  #"#9bbf8a" "#1EBECD"  "#82afda"  "#AE3918" "#add3e2","#8dcec8" 
-             ) +
-    scale_y_continuous(labels = scales::comma) +
-    scale_x_continuous(breaks = xbreaks,
-                      labels = xlabels) +
-    ylab(paste0(stringr::str_to_title(count_period), " notifications")) + 
-    xlab(x_label) +
+
+  # y label
+  y_lab <- if (cd4_mode)
+    paste0(stringr::str_to_title(count_period), " average CD4 (cells/μL)")
+  else
+    paste0(stringr::str_to_title(count_period), " notifications")
+
+  # y-axis range
+  max_y <- max(trend_data$notifications, na.rm = TRUE)
+  auto_upper <- if (is.finite(max_y) && max_y > 0) {
+    p <- floor(log10(max_y)); ceiling(max_y / 10^p) * 10^p
+  } else 1
+
+  # --- Plot ---
+  ggplot(trend_data, aes(x = time, y = notifications)) +
+    geom_point(aes(color = "data")) +
+    geom_line(
+      aes(y = predict(trend_model, type = "response"), color = "overall"),
+      size = 1
+    ) +
+    scale_color_manual(
+      "",
+      values = c(data = "#82afda", overall = "#EE7C7A"),
+      labels = c(data = if (cd4_mode) "Observed CD4" else "HIV data",
+                 overall = if (cd4_mode) "Overall mean CD4 trend" else "Fitted trend")
+    ) +
+    scale_y_continuous(
+      limits = c(0, auto_upper),
+      labels = scales::comma,
+      expand = expansion(mult = c(0, 0.02))
+    ) +
+    scale_x_continuous(breaks = xbreaks, labels = xlabels) +
+    ylab(y_lab) + xlab(x_label) +
     theme_minimal() +
     theme(
-      panel.grid.minor = element_blank(),
-      panel.grid.major.x = element_blank(),
-      panel.grid.major.y = element_line(color = "gray90"),
-      panel.border = element_rect(fill = NA, color = "gray80"),
+      panel.grid = element_blank(),
+      panel.border = element_blank(),
+      axis.line = element_line(color = "black"),
       plot.title = element_text(hjust = 0.5, face = "bold"),
       axis.text.x = element_text(angle = 45, hjust = 1),
-      # Clean white background
       plot.background = element_rect(fill = "white", color = NA),
-      # Reasonable margins
-      plot.margin = margin(t = 20, r = 30, b = 20, l = 20, unit = "pt"),
+      plot.margin = margin(t = 5, r = 5, b = 5, l = 5, unit = "pt"),
       legend.position = "bottom"
     )
-  
-  # Function to expand y-axis to include maximum value
-  max_y <- max(trend_data$notifications, na.rm=TRUE)
-  if (max_y > 0) {
-    min_log <- floor(log10(max_y))
-    trend_plot <- trend_plot + expand_limits(y=c(0, ceiling(max_y/10^min_log)*10^min_log))
-  }
-  
-  return(trend_plot)
 }
+
+
+
+cd4_quantile_plot <- function(
+  cd4_quant_data,              # from get_cd4_quantile_trend_data()
+  count_period = "monthly",
+  segment_model = NULL,        # optional: add dashed vlines at joinpoints
+  y_upper = NULL,
+  y_break = NULL
+) {
+  require(ggplot2); require(scales)
+
+  # X breaks & labels
+  x_label_vec <- c("monthly" = "Year", "quarterly" = "Year", "annually" = "Year")
+  x_label <- x_label_vec[count_period]
+
+  if (count_period %in% c("monthly","quarterly")) {
+    if (count_period == "monthly") {
+      years <- unique(floor(cd4_quant_data$time))
+      xbreaks <- years + 0.0
+      xlabels <- as.character(years)
+    } else {
+      xbreaks <- floor(min(cd4_quant_data$time)):ceiling(max(cd4_quant_data$time))
+      xlabels <- xbreaks
+    }
+  } else {
+    xbreaks <- unique(cd4_quant_data$time)
+    xlabels <- xbreaks
+  }
+
+  # y limits
+  max_y <- max(cd4_quant_data$p95, na.rm = TRUE)
+  auto_upper <- 1500
+  y_upper_final <- if (is.null(y_upper)) auto_upper else y_upper
+  y_breaks <- if (!is.null(y_break) && is.finite(y_break) && y_break > 0) seq(0, y_upper_final, by = y_break) else waiver()
+
+  # Long format for one legend
+  df_long <- tidyr::pivot_longer(cd4_quant_data, cols = c(p05, p50, p95),
+                                 names_to = "series", values_to = "value")
+  series_labs <- c(p05 = "5th", p50 = "Median", p95 = "95th")
+  series_cols <- c(p05 = "#9bbf8a", p50 = "#F2AB3F", p95 = "#B0AEC6")  # soft green, salmon, sky-blue
+
+  p <- ggplot(df_long, aes(x = time, y = value, color = series)) +
+    geom_line(size = 1) +
+    scale_color_manual("", values = series_cols, labels = series_labs) +
+    ylab(paste0(stringr::str_to_title(count_period), " CD4 (cells/μL)")) +
+    xlab(x_label) +
+    scale_y_continuous(limits = c(0, y_upper_final), breaks = y_breaks, labels = scales::comma,
+                       expand = expansion(mult = c(0, 0.02))) +
+    scale_x_continuous(breaks = xbreaks, labels = xlabels) +
+    theme_minimal() +
+    theme(
+      panel.grid = element_blank(),
+      panel.border = element_blank(),
+      axis.line = element_line(color = "black"),
+      plot.title = element_text(hjust = 0.5, face = "bold"),
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      plot.background = element_rect(fill = "white", color = NA),
+      plot.margin = margin(t = 5, r = 5, b = 5, l = 5, unit = "pt"),
+      legend.position = "bottom"
+    )
+
+  # Optional: add dashed lines at joinpoints (same visual cue as segmented plot)
+  if (!is.null(segment_model) && !is.null(segment_model$psi) && nrow(segment_model$psi) > 0) {
+    for (i in 1:nrow(segment_model$psi)) {
+      p <- p + geom_vline(xintercept = segment_model$psi[i, "Est."],
+                          linetype = "dashed", colour = "#EE7C7A")
+    }
+  }
+
+  return(p)
+}
+
 
 # Runs the complete “overall trend” workflow: prepares data, 
 # fits the model, makes the plot, and returns a tidy summary.
@@ -1499,12 +1766,16 @@ analyze_overall_trend <- function(data,
                                place_acq_filter = NULL,     # place_acq
                                state_res_filter = NULL,     # state_res
                                phn_res_filter = NULL,       # phn_res
+                               late_diag_filter = NULL,      # late_hiv_diag_flag
+                               advanced_diag_filter = NULL,       # advanced_hiv_diag_flag
                                count_period = "monthly",    # "monthly", "quarterly", or "annually"
                                include_overseas = FALSE,     # Include previously diagnosed overseas
                                family_type = "poisson",            # "poisson" or "linear"
                                save_plots = FALSE,          # Whether to save plots
                                output_dir = NULL,           # Directory to save plots
-                               plot_name_prefix = "hiv_trend") {
+                               plot_name_prefix = "hiv_trend",
+                               CD4 = FALSE,                 # cd4 count at diagnosis available
+                               cd4_var = "cd4_count_diag") {
   
   # Check parameters
   if (save_plots && is.null(output_dir)) {
@@ -1525,7 +1796,11 @@ analyze_overall_trend <- function(data,
     state_res_filter = state_res_filter,
     phn_res_filter = phn_res_filter,
     count_period = count_period,
-    include_overseas = include_overseas
+    include_overseas = include_overseas,
+    late_diag_filter = late_diag_filter,
+    advanced_diag_filter = advanced_diag_filter,
+    CD4 = CD4,
+    cd4_var = cd4_var
   )
   
   # Create title based on filters
@@ -1536,7 +1811,10 @@ analyze_overall_trend <- function(data,
   if (!is.null(au_birth_filter)) title_parts <- c(title_parts, paste0("Birth place: ", au_birth_filter))
   if (!is.null(state_res_filter)) title_parts <- c(title_parts, paste0("State: ", state_res_filter))
   if (!is.null(phn_res_filter)) title_parts <- c(title_parts, paste0("PHN: ", phn_res_filter))
+  if(!is.null(late_diag_filter)) title_parts <- c(title_parts, paste0("Late HIV Diagnosis"))
+  if(!is.null(advanced_diag_filter)) title_parts <- c(title_parts, paste0("Advanced HIV Diagnosis"))
   if (include_overseas == TRUE) title_parts <- c(title_parts, paste0("Previously diagnosed overseas"))
+  if (CD4) title_parts <- c(title_parts, "Outcome: Average CD4")
   if (length(title_parts) > 0) {
     subtitle <- paste(title_parts, collapse = ", ")
   } else {
@@ -1547,12 +1825,15 @@ analyze_overall_trend <- function(data,
     subtitle <- paste0(subtitle, " (Excluding previously diagnosed overseas)")
   }
   
-  # Perform overall trend analysis
-  overall_trend <- get_trend(trend_data, family_type = family_type)
-  
+  # Auto-switch family when CD4
+  fam <- if (CD4 && tolower(family_type) %in% c("poisson","nb")) "gaussian" else family_type
+
+  overall_trend <- get_trend(trend_data, family_type = fam)
+ 
   # Create overall trend plot
   overall_plot <- overall_trend_plot(trend_data, overall_trend$model, count_period = count_period) +
-    ggtitle(paste0("HIV Notification Trend (", count_period, ")"), subtitle = subtitle)
+    ggtitle(paste0(if (CD4) "Average CD4 Trend (" else "HIV Notification Trend (", count_period, ")"),
+            subtitle = subtitle)
   
   # Save overall trend plot if requested
   if (save_plots && !is.null(output_dir)) {
@@ -1566,14 +1847,26 @@ analyze_overall_trend <- function(data,
     )
   }
   
-  # Format overall trend results
-  overall_results <- data.frame(
-    Model = "Overall Trend",
-    Estimate = overall_trend$coeff,
-    Lower_CI = overall_trend$interval[1],
-    Upper_CI = overall_trend$interval[2],
-    P_value = overall_trend$p_value
-  )
+  # Results table: interpret based on family
+  if (tolower(overall_trend$type_used) == "gaussian") {
+    overall_results <- data.frame(
+      Model = "Overall Trend (Gaussian)",
+      Slope_per_Year = overall_trend$coeff,       # Δ CD4 per year
+      Lower_CI = overall_trend$interval[1],
+      Upper_CI = overall_trend$interval[2],
+      P_value = overall_trend$p_value,
+      stringsAsFactors = FALSE
+    )
+  } else {
+    overall_results <- data.frame(
+      Model = "Overall Trend",
+      Estimate = overall_trend$coeff,
+      Lower_CI = overall_trend$interval[1],
+      Upper_CI = overall_trend$interval[2],
+      P_value = overall_trend$p_value,
+      stringsAsFactors = FALSE
+    )
+  }
   
   # Return results
   return(list(
@@ -1591,44 +1884,47 @@ seg_CI <- function(est, std_err) {
 
 # Fits a joinpoint (segmented) model on top of the base trend, 
 # returning breakpoints with CIs, segment-specific slopes, and BIC.
-get_segmented_trend_fixed <- function(overall_model, initial_changes, family_type = "poisson") {
+get_segmented_trend <- function(overall_model, initial_changes, family_type = "poisson") {
   require(segmented)
 
-  # 1) Pull a clean data.frame from the fitted model and coerce 'time' to numeric
   base_df <- as.data.frame(stats::model.frame(overall_model))
   if (!is.numeric(base_df$time)) base_df$time <- as.numeric(base_df$time)
   base_formula <- stats::formula(overall_model)
 
-# 2) Refit a clean base model for segmented:
-#    If NB, first estimate theta on a simple NB, then fix it in a GLM with negative.binomial(theta_hat)
-if (inherits(overall_model, "negbin") || tolower(family_type) == "nb") {
-  # one-shot theta estimate on the base (no joinpoints)
-  nb0 <- tryCatch(
-    MASS::glm.nb(base_formula, data = base_df, link = log,
-                 na.action = na.exclude, model = TRUE, x = TRUE, y = TRUE,
-                 control = glm.control(maxit = 100, trace = FALSE)),
-    error = function(e) NULL
-  )
-  if (is.null(nb0)) stop("NB base model failed; cannot proceed to segmented.")
+  # Decide family for refit
+  fam_lower <- tolower(family_type)
+  use_gaussian <- fam_lower %in% c("gaussian","linear","gauss")
+  use_nb <- fam_lower == "nb"
 
-  theta_hat <- nb0$theta
-  # now fit a standard GLM with fixed-theta NB family (stable for segmented)
-  re_fit <- stats::glm(
-    base_formula, data = base_df,
-    family = MASS::negative.binomial(theta_hat),
-    na.action = na.exclude, model = TRUE, x = TRUE, y = TRUE,
-    control = glm.control(maxit = 100)
-  )
-} else {
-  re_fit <- stats::glm(
-    base_formula, data = base_df, family = poisson(),
-    na.action = na.exclude, model = TRUE, x = TRUE, y = TRUE,
-    control = glm.control(maxit = 100)
-  )
-}
+  if (inherits(overall_model, "negbin") || use_nb) {
+    nb0 <- tryCatch(
+      MASS::glm.nb(base_formula, data = base_df, link = log,
+                   na.action = na.exclude, model = TRUE, x = TRUE, y = TRUE,
+                   control = glm.control(maxit = 100, trace = FALSE)),
+      error = function(e) NULL
+    )
+    if (is.null(nb0)) stop("NB base model failed; cannot proceed to segmented.")
+    theta_hat <- nb0$theta
+    re_fit <- stats::glm(
+      base_formula, data = base_df,
+      family = MASS::negative.binomial(theta_hat),
+      na.action = na.exclude, model = TRUE, x = TRUE, y = TRUE,
+      control = glm.control(maxit = 100)
+    )
+  } else if (use_gaussian) {
+    re_fit <- stats::glm(
+      base_formula, data = base_df, family = gaussian(),
+      na.action = na.exclude, model = TRUE, x = TRUE, y = TRUE,
+      control = glm.control(maxit = 100)
+    )
+  } else {
+    re_fit <- stats::glm(
+      base_formula, data = base_df, family = poisson(),
+      na.action = na.exclude, model = TRUE, x = TRUE, y = TRUE,
+      control = glm.control(maxit = 100)
+    )
+  }
 
-
-  # 3) Segment the GLM explicitly via the glm method; keep bootstrapping off (faster, simpler)
   segment_trend <- tryCatch({
     segmented.glm(
       re_fit,
@@ -1642,36 +1938,46 @@ if (inherits(overall_model, "negbin") || tolower(family_type) == "nb") {
   })
   if (is.null(segment_trend)) return(NULL)
 
-  # internal fitted object for BIC/predictions
   glm_fit <- if (!is.null(segment_trend$glm.fit)) segment_trend$glm.fit else segment_trend
 
-  seg_BIC  <- tryCatch(BIC(glm_fit),       error = function(e) NA_real_)
-  base_BIC <- tryCatch(BIC(re_fit),        error = function(e) NA_real_)
+  seg_BIC  <- tryCatch(BIC(glm_fit), error = function(e) NA_real_)
+  base_BIC <- tryCatch(BIC(re_fit),  error = function(e) NA_real_)
 
-  # Breakpoint CIs
   psi <- segment_trend$psi
   psi_interval <- tryCatch({
     confint.segmented(segment_trend)
   }, error = function(e) {
     se_col <- tryCatch({ summary(segment_trend)$psi[, "Std. Error"] }, error = function(e2) rep(0.05, nrow(psi)))
-    cbind(
-      "Est." = psi[, "Est."],
-      "CI(95%).low" = psi[, "Est."] - 1.96 * se_col,
-      "CI(95%).up"  = psi[, "Est."] + 1.96 * se_col
-    )
+    cbind("Est." = psi[, "Est."],
+          "CI(95%).low" = psi[, "Est."] - 1.96 * se_col,
+          "CI(95%).up"  = psi[, "Est."] + 1.96 * se_col)
   })
 
-  # Slopes (log-link → exponentiate to get RR per time unit)
+  # Slopes on link scale:
+  # - Poisson/NB (log link): exponentiate → rate ratio per unit time
+  # - Gaussian (identity): DO NOT exponentiate → change in CD4 per unit time
   slopes_list <- tryCatch({
     s <- slope(segment_trend)$time
-    list(
-      est = exp(s[, "Est."]),
-      lo  = exp(s[, "CI(95%).l"]),
-      up  = exp(s[, "CI(95%).u"])
-    )
+    if (use_gaussian) {
+      list(
+        est = s[, "Est."],
+        lo  = s[, "CI(95%).l"],
+        up  = s[, "CI(95%).u"]
+      )
+    } else {
+      list(
+        est = exp(s[, "Est."]),
+        lo  = exp(s[, "CI(95%).l"]),
+        up  = exp(s[, "CI(95%).u"])
+      )
+    }
   }, error = function(e) {
     k <- nrow(psi) + 1
-    list(est = rep(1, k), lo = rep(0.9, k), up = rep(1.1, k))
+    if (use_gaussian) {
+      list(est = rep(0, k), lo = rep(-10, k), up = rep(10, k))
+    } else {
+      list(est = rep(1, k), lo = rep(0.9, k), up = rep(1.1, k))
+    }
   })
 
   change_date <- data.frame(
@@ -1680,36 +1986,23 @@ if (inherits(overall_model, "negbin") || tolower(family_type) == "nb") {
     Upper_CI = round(psi_interval[, "CI(95%).up"], 4)
   )
 
-    # --- Wald tests for slope change at each joinpoint ---
-  # Each 'Uj.time' coefficient in segmented encodes the change in slope at joinpoint j.
   wald_tab <- tryCatch({
     coefs <- coef(summary(segment_trend))
     rn <- rownames(coefs)
-    idx <- which(grepl("^U\\d*\\.time$", rn))   # robust match for U1.time, U2.time, ...
+    idx <- which(grepl("^U\\d*\\.time$", rn))
+    if (length(idx) == 0) idx <- which(grepl("^U.*\\.time$", rn))
     if (length(idx) == 0) {
-      # fallback: any 'U.*time' term
-      idx <- which(grepl("^U.*\\.time$", rn))
-    }
-    if (length(idx) == 0) {
-      data.frame(
-        Joinpoint = integer(0), Term = character(0),
-        Estimate = numeric(0), SE = numeric(0), z = numeric(0),
-        p_value = numeric(0), stringsAsFactors = FALSE
-      )
+      data.frame(Joinpoint = integer(0), Term = character(0),
+                 Estimate = numeric(0), SE = numeric(0), z = numeric(0),
+                 p_value = numeric(0), stringsAsFactors = FALSE)
     } else {
       out <- coefs[idx, , drop = FALSE]
-      # align with psi rows by order
-      jp_idx <- seq_len(nrow(out))
-      # z and p (defensive compute even if summary already provides z/p)
       zvals <- out[, "Estimate"] / out[, "Std. Error"]
       pvals <- 2 * pnorm(-abs(zvals))
-
-      # attach the joinpoint decimal time + month label
       jp_time <- if (!is.null(psi)) psi[, "Est."] else rep(NA_real_, length(idx))
       to_month <- function(x) format(lubridate::round_date(lubridate::date_decimal(x), unit = "month"), "%Y-%m")
-
       data.frame(
-        Joinpoint      = jp_idx,
+        Joinpoint      = seq_len(nrow(out)),
         Term           = rownames(out),
         Estimate       = out[, "Estimate"],
         SE             = out[, "Std. Error"],
@@ -1717,69 +2010,68 @@ if (inherits(overall_model, "negbin") || tolower(family_type) == "nb") {
         p_value        = pvals,
         JP_Time        = jp_time,
         JP_Time_Month  = if (length(jp_time)) to_month(jp_time) else character(0),
-        # optional: multiplicative change in slope on log-link scale
-        Exp_Estimate   = exp(out[, "Estimate"]),
+        Exp_Estimate   = if (use_gaussian) NA_real_ else exp(out[, "Estimate"]),
         stringsAsFactors = FALSE
       )
     }
   }, error = function(e) {
-    data.frame(
-      Joinpoint = integer(0), Term = character(0),
-      Estimate = numeric(0), SE = numeric(0), z = numeric(0),
-      p_value = numeric(0), JP_Time = numeric(0), JP_Time_Month = character(0),
-      Exp_Estimate = numeric(0), stringsAsFactors = FALSE
-    )
+    data.frame(Joinpoint = integer(0), Term = character(0),
+               Estimate = numeric(0), SE = numeric(0), z = numeric(0),
+               p_value = numeric(0), JP_Time = numeric(0),
+               JP_Time_Month = character(0), Exp_Estimate = numeric(0),
+               stringsAsFactors = FALSE)
   })
-  
 
-# Calculate Average APC (AAPC) for the entire period
-aapc <- tryCatch({
-  # For segmented models, AAPC is weighted average of segment slopes
-  if (!is.null(psi) && nrow(psi) > 0) {
-    # Get time range
-    time_range <- range(base_df$time, na.rm = TRUE)
-    total_time <- diff(time_range)
-    
-    # Calculate segment lengths
-    breaks <- c(time_range[1], psi[, "Est."], time_range[2])
-    seg_lengths <- diff(breaks)
-    weights <- seg_lengths / total_time
-    
-    # Weighted average of log-scale slopes (then exponentiate)
-    log_slopes <- log(slopes_list$est)
-    aapc_log <- sum(weights * log_slopes)
-    aapc_est <- exp(aapc_log)
-    
-    # For CI: similar weighted average on log scale
-    log_slopes_lo <- log(slopes_list$lo)
-    log_slopes_up <- log(slopes_list$up)
-    aapc_lo <- exp(sum(weights * log_slopes_lo))
-    aapc_up <- exp(sum(weights * log_slopes_up))
-    
-    list(est = aapc_est, lo = aapc_lo, up = aapc_up)
-  } else {
-    # For k=0 (no joinpoints), AAPC = single slope
-    list(est = slopes_list$est[1], lo = slopes_list$lo[1], up = slopes_list$up[1])
-  }
-}, error = function(e) {
-  list(est = NA, lo = NA, up = NA)
-})
+  # AAPC equivalent:
+  # - Gaussian: weighted average of slopes (absolute Δ CD4 / year)
+  # - Poisson/NB: weighted average of log-slopes → exp(...)
+  aapc <- tryCatch({
+    if (!is.null(psi) && nrow(psi) > 0) {
+      time_range <- range(base_df$time, na.rm = TRUE)
+      total_time <- diff(time_range)
+      breaks <- c(time_range[1], psi[, "Est."], time_range[2])
+      seg_lengths <- diff(breaks)
+      weights <- seg_lengths / total_time
 
+      if (use_gaussian) {
+        est <- sum(weights * slopes_list$est)
+        lo  <- sum(weights * slopes_list$lo)
+        up  <- sum(weights * slopes_list$up)
+        list(est = est, lo = lo, up = up)  # units: CD4 per year
+      } else {
+        log_slopes <- log(slopes_list$est)
+        aapc_log <- sum(weights * log_slopes)
+        aapc_est <- exp(aapc_log)
+        log_slopes_lo <- log(slopes_list$lo)
+        log_slopes_up <- log(slopes_list$up)
+        aapc_lo <- exp(sum(weights * log_slopes_lo))
+        aapc_up <- exp(sum(weights * log_slopes_up))
+        list(est = aapc_est, lo = aapc_lo, up = aapc_up)
+      }
+    } else {
+      if (use_gaussian) {
+        list(est = slopes_list$est[1], lo = slopes_list$lo[1], up = slopes_list$up[1])
+      } else {
+        list(est = slopes_list$est[1], lo = slopes_list$lo[1], up = slopes_list$up[1])
+      }
+    }
+  }, error = function(e) list(est = NA, lo = NA, up = NA))
 
-list(
-  segment_model = segment_trend,
-  psi = psi,
-  psi_interval = psi_interval,
-  change_date = change_date,
-  slopes = slopes_list$est,
-  slopes_lower = slopes_list$lo,
-  slopes_upper = slopes_list$up,
-  bics = c("segment_BIC" = seg_BIC, "overall_BIC" = base_BIC),
-  model_type = ifelse(tolower(family_type) == "nb", "NB", "poisson"),
-  wald_slope_change = wald_tab,
-  aapc = aapc  
-)  
+  list(
+    segment_model = segment_trend,
+    psi = psi,
+    psi_interval = psi_interval,
+    change_date = change_date,
+    slopes = slopes_list$est,
+    slopes_lower = slopes_list$lo,
+    slopes_upper = slopes_list$up,
+    bics = c("segment_BIC" = seg_BIC, "overall_BIC" = base_BIC),
+    model_type = if (use_gaussian) "gaussian" else if (use_nb) "NB" else "poisson",
+    wald_slope_change = wald_tab,
+    aapc = aapc
+  )
 }
+
 
 
 
@@ -1810,7 +2102,7 @@ list(
   min_year <- min(data_years); max_year <- max(data_years)
   initial_points <- seq(min_year, max_year, length.out = k + 2)[2:(k + 1)]
 
-  seg_fit <- get_segmented_trend_fixed(base_model, initial_points, family_type = family_type)
+  seg_fit <- get_segmented_trend(base_model, initial_points, family_type = family_type)
   if (is.null(seg_fit)) {
     return(list(k = k, fit = NULL, bic = Inf))
   }
@@ -1822,7 +2114,7 @@ list(
 }
 
 # Tries 0..K joinpoints, compares BICs, and picks the model with the best (lowest) BIC.
-find_best_segment_model_fixed <- function(model, data_years, num_changes = 1, family_type = "poisson") {
+find_best_segment_model <- function(model, data_years, num_changes = 1, family_type = "poisson") {
   require(segmented)
 
   # Fit all candidates
@@ -1848,26 +2140,23 @@ find_best_segment_model_fixed <- function(model, data_years, num_changes = 1, fa
 }
 
 # Plots the data and the chosen segmented fit, marking each estimated joinpoint with a dashed line.
-segment_plot_fixed <- function(trend_data, trend_model, count_period = "monthly", 
+segment_plot <- function(trend_data, trend_model, count_period = "monthly", 
                               overall_plot = FALSE, overall_model = NULL, 
                               segment_plot = TRUE, y_upper = NULL, y_break = NULL) {
-  
-  # Set up x-axis label
+  cd4_mode <- isTRUE(attr(trend_data, "cd4_mode"))
+
   x_label_vec <- c("monthly" = "Year", "quarterly" = "Year", "annually" = "Year")
   x_label <- x_label_vec[count_period]
-  
-  # Values to plot - with additional error handling
+
   segment_values <- tryCatch({
     data.frame(time = trend_data$time, 
                segvalue = fitted(trend_model$segment_model))
   }, error = function(e) {
-    cat("Error creating segment values:", conditionMessage(e), "\n")
-    return(data.frame(time = trend_data$time, 
-                      segvalue = predict(overall_model, type = "response")))
+    data.frame(time = trend_data$time, 
+               segvalue = predict(overall_model, type = "response"))
   })
-  
-  # Set-up x-axis breaks
-  if (count_period == "monthly" || count_period == "quarterly") {
+
+  if (count_period %in% c("monthly","quarterly")) {
     if (count_period == "monthly") {
       years <- unique(floor(trend_data$time))
       xbreaks <- years + 0.0
@@ -1880,86 +2169,115 @@ segment_plot_fixed <- function(trend_data, trend_model, count_period = "monthly"
     xbreaks <- unique(trend_data$time)
     xlabels <- xbreaks
   }
-# Compute an upper y limit that's a nice round ceiling
-max_y <- max(trend_data$notifications, na.rm = TRUE)
-auto_upper <- if (is.finite(max_y) && max_y > 0) {
-    p <- floor(log10(max_y))
-    ceiling(max_y / 10^p) * 10^p
+
+  max_y <- max(trend_data$notifications, na.rm = TRUE)
+  auto_upper <- if (is.finite(max_y) && max_y > 0) {
+    p <- floor(log10(max_y)); ceiling(max_y / 10^p) * 10^p
   } else 1
-  # final upper = max(auto, user-specified if any)
   y_upper_final <- if (is.null(y_upper)) auto_upper else y_upper
-  # breaks sequence if user provided y_break
-  y_breaks <- if (!is.null(y_break) && is.finite(y_break) && y_break > 0) {
-    seq(0, y_upper_final, by = y_break)
-  } else waiver()
-  # Base plot with data points
+  y_breaks <- if (!is.null(y_break) && is.finite(y_break) && y_break > 0) seq(0, y_upper_final, by = y_break) else waiver()
+
+  y_lab <- if (cd4_mode) {
+    paste0(stringr::str_to_title(count_period), " average CD4 (cells/μL)")
+  } else {
+    paste0(stringr::str_to_title(count_period), " notifications")
+  }
+
   trend_plot <- ggplot(trend_data, aes(x = time, y = notifications)) + 
     geom_point(aes(color = "data")) +
-    ylab(paste0(stringr::str_to_title(count_period), " notifications")) +
-    xlab(x_label) +
+    ylab(y_lab) + xlab(x_label) +
     scale_y_continuous(
-    limits = c(0, y_upper_final),
-    breaks = y_breaks,
-    labels = scales::comma,
-    expand = expansion(mult = c(0, 0.02))
+      limits = c(0, y_upper_final),
+      breaks = y_breaks,
+      labels = scales::comma,
+      expand = expansion(mult = c(0, 0.02))
     ) +
     scale_x_continuous(breaks = xbreaks, labels = xlabels) +
     theme_minimal() +
     theme(
-      # Remove all grid lines
       panel.grid = element_blank(),
-      # Remove box border
       panel.border = element_blank(),
-      # Keep axis lines only
       axis.line = element_line(color = "black"),
       plot.title = element_text(hjust = 0.5, face = "bold"),
       axis.text.x = element_text(angle = 45, hjust = 1),
-      # Clean white background
       plot.background = element_rect(fill = "white", color = NA),
-      # Reasonable margins
       plot.margin = margin(t = 5, r = 5, b = 5, l = 5, unit = "pt"),
       legend.position = "bottom"
-    ) 
+    )
 
-  # Add lines conditionally
   line_layers <- list()
   color_values <- c("data" = "#82afda")
-  color_labels <- c("data" = "HIV data")
+  color_labels <- c("data" = if (cd4_mode) "Mean CD4" else "HIV data")
 
   if (segment_plot && !is.null(trend_model$segment_model)) {
-    line_layers <- c(line_layers,
-      geom_line(data = segment_values, aes(x = time, y = segvalue, color = "segment"), size = 1)
-    )
+    line_layers <- c(line_layers, geom_line(data = segment_values, aes(x = time, y = segvalue, color = "segment"), size = 1))
     color_values["segment"] <- "#EE7C7A"
     color_labels["segment"] <- "Fitted trends"
   }
-
   if (overall_plot && !is.null(overall_model)) {
-    line_layers <- c(line_layers,
-      geom_line(aes(y = predict(overall_model, type = "response"), color = "overall"), size = 1)
-    )
+    line_layers <- c(line_layers, geom_line(aes(y = predict(overall_model, type = "response"), color = "overall"), size = 1))
     color_values["overall"] <- "#82afda"
     color_labels["overall"] <- "Overall trend"
   }
-
-  # Add all lines
-  for (layer in line_layers) {
-    trend_plot <- trend_plot + layer
-  }
-
-  # One unified color scale
+  for (layer in line_layers) trend_plot <- trend_plot + layer
   trend_plot <- trend_plot + scale_colour_manual("", values = color_values, labels = color_labels)
 
-  # Add change points
   if (!is.null(trend_model$psi)) {
     for (i in 1:nrow(trend_model$psi)) {
-      trend_plot <- trend_plot +
-        geom_vline(xintercept = trend_model$psi[i, "Est."],
-                   linetype = "dashed", colour =  "#EE7C7A")
+      trend_plot <- trend_plot + geom_vline(xintercept = trend_model$psi[i, "Est."], linetype = "dashed", colour = "#EE7C7A")
     }
   }
-
   return(trend_plot)
+}
+
+
+# Time-weighted mean slope and 95% CI for a Gaussian segmented.glm
+# Uses linear contrast on the coefficient covariance (statistically correct).
+weighted_gaussian_slope_CI <- function(selected, trend_data) {
+  stopifnot(!is.null(selected$segment_model))
+  seg <- selected$segment_model
+
+  tmin <- min(trend_data$time, na.rm = TRUE)
+  tmax <- max(trend_data$time, na.rm = TRUE)
+  jp   <- if (!is.null(selected$psi) && nrow(selected$psi) > 0) as.numeric(selected$psi[,"Est."]) else numeric(0)
+  breaks <- c(tmin, jp, tmax)
+  seg_lengths <- diff(breaks)
+  w <- seg_lengths / sum(seg_lengths)      # time-weights per segment
+  K <- length(w)
+
+  theta <- stats::coef(seg)
+  V     <- stats::vcov(seg)
+
+  nm <- names(theta)
+  idx_time <- which(nm == "time")
+  if (length(idx_time) != 1) idx_time <- grep("^time$", nm)
+  u_idx <- grep("^U\\d+\\.time$", nm)
+
+  if (length(idx_time) != 1) stop("Could not find base time slope in segmented coefs.")
+
+  # Contrast vector: mu = (sum w) * beta_time + (w2+...+wK)*U1 + (w3+...+wK)*U2 + ...
+  cvec <- rep(0, length(theta)); names(cvec) <- nm
+  cvec[idx_time] <- sum(w)  # = 1
+  if (length(u_idx) > 0) {
+    tail_sums <- rev(cumsum(rev(w)))[-1]  # (w2+...+wK, w3+...+wK, ..., wK)
+    cvec[u_idx] <- tail_sums[seq_along(u_idx)]
+  }
+
+  mu <- sum(cvec * theta)
+  se <- sqrt(as.numeric(t(cvec) %*% V %*% cvec))
+  ci <- c(mu - 1.96*se, mu + 1.96*se)
+
+  list(
+    weighted_slope = mu,   # Δ CD4 per year (time-weighted mean)
+    se = se,
+    ci95 = ci,
+    weights = w,
+    segments = data.frame(
+      start = breaks[-length(breaks)],
+      end   = breaks[-1],
+      weight = w
+    )
+  )
 }
 
 
@@ -1976,19 +2294,22 @@ analyze_segmented_trend_complete <- function(data,
                                              place_acq_filter = NULL,
                                              state_res_filter = NULL,
                                              phn_res_filter = NULL,
+                                             late_diag_filter = NULL,
+                                             advanced_diag_filter = NULL,
                                              count_period = "monthly",
                                              include_overseas = FALSE,
-                                             family_type = "poisson",         # "poisson" or "NB"
-                                             num_changes = 1,          # compare 0..num_changes
+                                             family_type = "poisson",
+                                             num_changes = 1,
                                              show_overall = TRUE,
                                              show_segment = TRUE,
                                              y_upper = NULL, 
                                              y_break = NULL,
                                              plot_name_prefix = NULL,
                                              main_title = NULL,
-                                             sub_title = NULL) {
-
-  # 1) build trend_data
+                                             sub_title = NULL,
+                                             CD4 = FALSE,                 # <<< NEW
+                                             cd4_var = "cd4_count_diag")  # <<< NEW
+{
   trend_data <- get_trend_data(
     data = data,
     start_year = start_year,
@@ -2002,164 +2323,250 @@ analyze_segmented_trend_complete <- function(data,
     state_res_filter = state_res_filter,
     phn_res_filter = phn_res_filter,
     count_period = count_period,
-    include_overseas = include_overseas
+    include_overseas = include_overseas,
+    late_diag_filter = late_diag_filter,
+    advanced_diag_filter = advanced_diag_filter,
+    CD4 = CD4,
+    cd4_var = cd4_var
   )
 
-  # 2) fit overall (base) model
-  overall_results <- get_trend(trend_data, family_type = family_type)
+  fam <- if (CD4 && tolower(family_type) %in% c("poisson","nb")) "gaussian" else family_type
+  overall_results <- get_trend(trend_data, family_type = fam)
   overall_trend_model <- overall_results$model
   data_years <- unique(floor(trend_data$time))
 
-  # 3) run selection across k=0..num_changes and pick best by BIC
-  cat("Running BIC-based selection across 0..", num_changes, " joinpoints\n")
-  selected <- find_best_segment_model_fixed(model = overall_trend_model,
+  selected <- find_best_segment_model(model = overall_trend_model,
                                             data_years = data_years,
                                             num_changes = num_changes,
-                                            family_type = family_type)
-
+                                            family_type = fam)
   selected_k <- if (!is.null(selected$selected_k)) selected$selected_k else 0
-  cat("Selected number of joinpoints (by BIC):", selected_k, "\n")
 
-  # 4) Plot (use your existing segment_plot_fixed)
-  # If selected_k == 0, we have no segmented object; just plot overall
   if (selected_k == 0) {
-    # Use the overall plot function you already have
     overall_plot <- overall_trend_plot(trend_data, overall_trend_model, count_period = count_period)
     segment_plot_result <- overall_plot + ggtitle(
-  ifelse(is.null(main_title), paste0("HIV Notification Trend (", count_period, ")"), main_title),
-  subtitle = ifelse(is.null(sub_title), "Selected model: 0 joinpoints (BIC)", sub_title)
-)
+      ifelse(is.null(main_title),
+             paste0(if (CD4) "Average CD4 Trend (" else "HIV Notification Trend (", count_period, ")"),
+             main_title),
+      subtitle = ifelse(is.null(sub_title), "Selected model: 0 joinpoints (BIC)", sub_title)
+    )
+
+    if (tolower(overall_results$type_used) == "gaussian") {
+      segment_results <- data.frame(
+        Segment = "Overall",
+        Slope_per_Year = overall_results$coeff,
+        Lower_CI = overall_results$interval[1],
+        Upper_CI = overall_results$interval[2],
+        Interpretation = ifelse(overall_results$coeff > 0, "Increasing CD4", ifelse(overall_results$coeff < 0, "Decreasing CD4", "Stable")),
+        Significant = ifelse(overall_results$interval[1] > 0 | overall_results$interval[2] < 0, "Yes", "No")
+      )
+    } else {
+      segment_results <- data.frame(
+        Segment = "Overall",
+        Rate_Ratio = overall_results$coeff,
+        Lower_CI = overall_results$interval[1],
+        Upper_CI = overall_results$interval[2],
+        Percent_Change_Per_Year = sprintf("%.1f%% (%.1f%% to %.1f%%)",
+                                          (overall_results$coeff - 1) * 100,
+                                          (overall_results$interval[1] - 1) * 100,
+                                          (overall_results$interval[2] - 1) * 100),
+        Interpretation = ifelse(overall_results$coeff > 1, "Increasing", ifelse(overall_results$coeff < 1, "Decreasing", "Stable")),
+        Significant = ifelse(overall_results$interval[1] > 1 | overall_results$interval[2] < 1, "Yes", "No")
+      )
+    }
 
     change_points_table <- data.frame(Change_Point = integer(0),
                                       Estimate = numeric(0),
                                       Lower_CI = numeric(0),
                                       Upper_CI = numeric(0))
-    segment_results <- data.frame(
-      Segment = "Overall",
-      Rate_Ratio = overall_results$coeff,
-      Lower_CI = overall_results$interval[1],
-      Upper_CI = overall_results$interval[2],
-      Percent_Change_Per_Year = sprintf("%.1f%% (%.1f%% to %.1f%%)",
-                                        (overall_results$coeff - 1) * 100,
-                                        (overall_results$interval[1] - 1) * 100,
-                                        (overall_results$interval[2] - 1) * 100),
-      Interpretation = ifelse(overall_results$coeff > 1, "Increasing",
-                              ifelse(overall_results$coeff < 1, "Decreasing", "Stable")),
-      Significant = ifelse(
-        overall_results$interval[1] > 1 | overall_results$interval[2] < 1, "Yes", "No"
-      )
-    )
   } else {
-    # Prepare segmented plot with your function
-    segment_plot_result <- segment_plot_fixed(
-  trend_data = trend_data,
-  trend_model = selected,                 
-  count_period = count_period,
-  overall_plot = show_overall,
-  overall_model = overall_trend_model,
-  segment_plot = show_segment,
-  y_upper = y_upper,
-  y_break = y_break
-) + ggtitle(
-  ifelse(is.null(main_title), paste0("HIV Notification Segmented Trend (", count_period, ")"), main_title),
-  subtitle = ifelse(is.null(sub_title), paste0("Selected model: ", selected_k, " joinpoint(s) (BIC)"), sub_title)
-)
+    segment_plot_result <- segment_plot(
+      trend_data = trend_data,
+      trend_model = selected,                 
+      count_period = count_period,
+      overall_plot = show_overall,
+      overall_model = overall_trend_model,
+      segment_plot = show_segment,
+      y_upper = y_upper,
+      y_break = y_break
+    ) + ggtitle(
+      ifelse(is.null(main_title),
+             paste0(if (CD4) "Average CD4 Segmented Trend (" else "HIV Notification Segmented Trend (", count_period, ")"),
+             main_title),
+      subtitle = ifelse(is.null(sub_title), paste0("Selected model: ", selected_k, " joinpoint(s) (BIC)"), sub_title)
+    )
 
-
-    # change points table
+    # change points
     if (!is.null(selected$change_date) && nrow(selected$change_date) > 0) {
-  to_month <- function(x) format(lubridate::round_date(lubridate::date_decimal(x), unit = "month"), "%Y-%m")
-  change_points_table <- data.frame(
-    Change_Point = seq_len(nrow(selected$change_date)),
-    Estimate      = selected$change_date$Estimate,
-    Lower_CI      = selected$change_date$Lower_CI,
-    Upper_CI      = selected$change_date$Upper_CI,
-    Estimate_Month = to_month(selected$change_date$Estimate),
-    Lower_CI_Month = to_month(selected$change_date$Lower_CI),
-    Upper_CI_Month = to_month(selected$change_date$Upper_CI)
-  )
-} else {
-  change_points_table <- data.frame(
-    Change_Point  = integer(0),
-    Estimate      = numeric(0),
-    Lower_CI      = numeric(0),
-    Upper_CI      = numeric(0),
-    Estimate_Month = character(0),
-    Lower_CI_Month = character(0),
-    Upper_CI_Month = character(0)
-  )
-}
-
-    # segment results
-    segment_results <- data.frame(
-      Segment = paste0("Segment ", seq_along(selected$slopes)),
-      Rate_Ratio = selected$slopes,
-      Lower_CI = selected$slopes_lower,
-      Upper_CI = selected$slopes_upper
-    )
-    segment_results$Percent_Change_Per_Year <- paste0(
-      sprintf("%.1f%%", (selected$slopes - 1) * 100),
-      " (",
-      sprintf("%.1f%%", (selected$slopes_lower - 1) * 100),
-      " to ",
-      sprintf("%.1f%%", (selected$slopes_upper - 1) * 100),
-      ")"
-    )
-    segment_results$Interpretation <- ifelse(
-      selected$slopes > 1, "Increasing",
-      ifelse(selected$slopes < 1, "Decreasing", "Stable")
-    )
-    segment_results$Significant <- ifelse(
-      (selected$slopes_lower > 1) | (selected$slopes_upper < 1),
-      "Yes", "No"
-    )
-        # Wald tests for slope change between adjacent segments
-    wald_results <- if (!is.null(selected$wald_slope_change)) {
-      selected$wald_slope_change
+      to_month <- function(x) format(lubridate::round_date(lubridate::date_decimal(x), unit = "month"), "%Y-%m")
+      change_points_table <- data.frame(
+        Change_Point  = seq_len(nrow(selected$change_date)),
+        Estimate      = selected$change_date$Estimate,
+        Lower_CI      = selected$change_date$Lower_CI,
+        Upper_CI      = selected$change_date$Upper_CI,
+        Estimate_Month = to_month(selected$change_date$Estimate),
+        Lower_CI_Month = to_month(selected$change_date$Lower_CI),
+        Upper_CI_Month = to_month(selected$change_date$Upper_CI)
+      )
     } else {
-      data.frame(
-        Joinpoint = integer(0), Term = character(0),
-        Estimate = numeric(0), SE = numeric(0), z = numeric(0),
-        p_value = numeric(0), JP_Time = numeric(0),
-        JP_Time_Month = character(0), Exp_Estimate = numeric(0)
+      change_points_table <- data.frame(
+        Change_Point  = integer(0),
+        Estimate      = numeric(0),
+        Lower_CI      = numeric(0),
+        Upper_CI      = numeric(0),
+        Estimate_Month = character(0),
+        Lower_CI_Month = character(0),
+        Upper_CI_Month = character(0)
       )
     }
+
+    # Segment results table: branch on Gaussian vs log-link families
+    if (tolower(selected$model_type) == "gaussian") {
+      segment_results <- data.frame(
+        Segment = paste0("Segment ", seq_along(selected$slopes)),
+        Slope_per_Year = selected$slopes,
+        Lower_CI = selected$slopes_lower,
+        Upper_CI = selected$slopes_upper
+      )
+      segment_results$Change_per_Year <- paste0(
+        sprintf("%.1f", selected$slopes), " (",
+        sprintf("%.1f", selected$slopes_lower), " to ",
+        sprintf("%.1f", selected$slopes_upper), ")"
+      )
+      segment_results$Interpretation <- ifelse(
+        selected$slopes > 0, "Increasing CD4",
+        ifelse(selected$slopes < 0, "Decreasing CD4", "Stable")
+      )
+      segment_results$Significant <- ifelse(
+        (selected$slopes_lower > 0) | (selected$slopes_upper < 0),
+        "Yes", "No"
+      )
+    } else {
+      segment_results <- data.frame(
+        Segment = paste0("Segment ", seq_along(selected$slopes)),
+        Rate_Ratio = selected$slopes,
+        Lower_CI = selected$slopes_lower,
+        Upper_CI = selected$slopes_upper
+      )
+      segment_results$Percent_Change_Per_Year <- paste0(
+        sprintf("%.1f%%", (selected$slopes - 1) * 100),
+        " (", sprintf("%.1f%%", (selected$slopes_lower - 1) * 100),
+        " to ", sprintf("%.1f%%", (selected$slopes_upper - 1) * 100), ")"
+      )
+      segment_results$Interpretation <- ifelse(
+        selected$slopes > 1, "Increasing",
+        ifelse(selected$slopes < 1, "Decreasing", "Stable")
+      )
+      segment_results$Significant <- ifelse(
+        (selected$slopes_lower > 1) | (selected$slopes_upper < 1),
+        "Yes", "No"
+      )
+    }
+
+    wald_results <- if (!is.null(selected$wald_slope_change)) selected$wald_slope_change else
+      data.frame(Joinpoint = integer(0), Term = character(0),
+                 Estimate = numeric(0), SE = numeric(0), z = numeric(0),
+                 p_value = numeric(0), JP_Time = numeric(0),
+                 JP_Time_Month = character(0), Exp_Estimate = numeric(0))
     wald_results$Significant <- ifelse(wald_results$p_value < 0.05, "Yes", "No")
-    
   }
 
-  # 5) BIC table of all candidates
   bic_table <- if (!is.null(selected$all_bic)) selected$all_bic else data.frame(Joinpoints = 0, BIC = BIC(overall_trend_model))
-  # 6) Create overall summary with AAPC
-overall_summary <- if (selected_k == 0) {
-  data.frame(
-    Population = "Overall",
-    Average_APC = overall_results$coeff,
-    Lower_CI = overall_results$interval[1],
-    Upper_CI = overall_results$interval[2],
-    Average_Percent_Change = sprintf("%.1f%% (%.1f%% to %.1f%%)",
-      (overall_results$coeff - 1) * 100,
-      (overall_results$interval[1] - 1) * 100,
-      (overall_results$interval[2] - 1) * 100
-    ),
-    stringsAsFactors = FALSE
-  )
+
+if (selected_k == 0) {
+  # No joinpoints: just report overall slope/CI (Gaussian expected for CD4)
+  if (tolower(overall_results$type_used) == "gaussian") {
+    overall_summary <- data.frame(
+      Population = "Overall",
+      Average_Slope_CD4_per_Year = unname(overall_results$coeff),
+      Lower_CI = unname(overall_results$interval[1]),
+      Upper_CI = unname(overall_results$interval[2]),
+      stringsAsFactors = FALSE
+    )
+  } else {
+    # Log-link case (for counts): standard APC/AAPC style
+    overall_summary <- data.frame(
+      Population = "Overall",
+      Average_APC = unname(overall_results$coeff),
+      Lower_CI = unname(overall_results$interval[1]),
+      Upper_CI = unname(overall_results$interval[2]),
+      Average_Percent_Change = sprintf(
+        "%.1f%% (%.1f%% to %.1f%%)",
+        (overall_results$coeff - 1) * 100,
+        (overall_results$interval[1] - 1) * 100,
+        (overall_results$interval[2] - 1) * 100
+      ),
+      stringsAsFactors = FALSE
+    )
+  }
 } else {
-  data.frame(
-    Population = "Overall",
-    Average_APC = selected$aapc$est,
-    Lower_CI = selected$aapc$lo,
-    Upper_CI = selected$aapc$up,
-    Average_Percent_Change = sprintf("%.1f%% (%.1f%% to %.1f%%)",
-      (selected$aapc$est - 1) * 100,
-      (selected$aapc$lo - 1) * 100,
-      (selected$aapc$up - 1) * 100
-    ),
-    stringsAsFactors = FALSE
+  # Joinpoints selected
+  if (tolower(selected$model_type) == "gaussian") {
+    # >>> Correct CI for time-weighted mean slope (no heuristic bounds)
+    base_df <- as.data.frame(stats::model.frame(overall_trend_model))
+    wg <- weighted_gaussian_slope_CI(selected, base_df)
+
+    overall_summary <- data.frame(
+      Population = "Overall",
+      Weighted_Slope_CD4_per_Year = wg$weighted_slope,
+      Lower_CI = wg$ci95[1],
+      Upper_CI = wg$ci95[2],
+      stringsAsFactors = FALSE
+    )
+  } else {
+    # Log-link case: AAPC via weighted average of log-slopes
+    overall_summary <- data.frame(
+      Population = "Overall",
+      Average_APC = selected$aapc$est,
+      Lower_CI = selected$aapc$lo,
+      Upper_CI = selected$aapc$up,
+      Average_Percent_Change = sprintf(
+        "%.1f%% (%.1f%% to %.1f%%)",
+        (selected$aapc$est - 1) * 100,
+        (selected$aapc$lo  - 1) * 100,
+        (selected$aapc$up  - 1) * 100
+      ),
+      stringsAsFactors = FALSE
+    )
+  }
+}
+  
+# --- Add CD4 quantile overlay when CD4 mode is on ---
+cd4_quantile_data <- NULL
+cd4_quantile_plot_obj <- NULL
+
+if (isTRUE(CD4)) {
+  cd4_quantile_data <- get_cd4_quantile_trend_data(
+    data = data,
+    start_year = start_year,
+    end_year = end_year,
+    exposure_filter = exposure_filter,
+    gender_filter = gender_filter,
+    region_birth_filter = region_birth_filter,
+    au_birth_filter = au_birth_filter,
+    lang_home_filter = lang_home_filter,
+    place_acq_filter = place_acq_filter,
+    state_res_filter = state_res_filter,
+    phn_res_filter = phn_res_filter,
+    include_overseas = include_overseas,
+    count_period = count_period,
+    cd4_var = cd4_var,
+    probs = c(0.05, 0.50, 0.95)
+  )
+
+  # pass 'selected' so joinpoints appear as dashed lines if available
+  cd4_quantile_plot_obj <- cd4_quantile_plot(
+    cd4_quant_data = cd4_quantile_data,
+    count_period   = count_period,
+    segment_model  = if (exists("selected")) selected else NULL,
+    y_upper        = y_upper,
+    y_break        = y_break
   )
 }
-  # 7) Return
+
+  
+  
   list(
+    trend_data = trend_data,
     overall_results = overall_results,
     selected_k = selected_k,
     segmented_model = if (selected_k == 0) NULL else selected,
@@ -2168,10 +2575,13 @@ overall_summary <- if (selected_k == 0) {
     segment_results = segment_results,
     overall_summary = overall_summary,
     bic_candidates = bic_table,
-    wald_adjacent_slopes = if (selected_k == 0) NULL else wald_results
-
+    wald_adjacent_slopes = if (selected_k == 0) NULL else wald_results,
+  cd4_quantile_data = cd4_quantile_data,
+  cd4_quantile_plot = cd4_quantile_plot_obj
   )
 }
+
+ryt
 
 #### # Example usage of the functions above ####
 #### All notifications ####
@@ -2193,14 +2603,14 @@ overall_summary <- if (selected_k == 0) {
 # overall_trend_model <- overall_results$overall_trend$model
 # data_years <- unique(floor(trend_data$time))
  
- # Use the fixed functions for segmented analysis
-# segmented_model <- find_best_segment_model_fixed(
+ # Use the functions for segmented analysis
+# segmented_model <- find_best_segment_model(
 #   model = overall_trend_model, 
 #   data_years = data_years,
 #   num_changes = 3
 # )
 
-#segment_plot_result <- segment_plot_fixed(
+#segment_plot_result <- segment_plot(
 #   trend_data = trend_data,
 #   trend_model = segmented_model,
 #   count_period = "monthly",
@@ -2235,7 +2645,6 @@ segmented_results$bic_candidates
 segmented_results$change_points
 segmented_results$wald_adjacent_slopes
 
-
 #### Previously diagnosed overseas ####
 PDO_segmented_results <- analyze_segmented_trend_complete(
   data = hiv_data,
@@ -2250,7 +2659,6 @@ PDO_segmented_results <- analyze_segmented_trend_complete(
   show_overall = FALSE,  # Don't show overall trend
   show_segment = TRUE   # Don't show segmented trends
 )
-
 
 PDO_segmented_results$segment_results
 PDO_segmented_results$segment_plot
@@ -2281,6 +2689,78 @@ SaveFigure <- function(folder, filename, figure,
 # If figure not already created make sure it is not overwritten
 if (!file.exists(file.path(figFolder, "FED_PDO_segment_plot_2001_2024_20251006.png"))) {
   SaveFigure(figFolder,"FED_PDO_segment_plot_2001_2024_20251006", FED_PDO_segment_plot)
+}
+
+#### All notifications (CD4) ####
+# CD4 segmented analysis example
+CD4_segmented_results <- analyze_segmented_trend_complete(
+  data = hiv_data,
+  start_year = 2001,
+  end_year = 2024,
+  count_period = "monthly",
+  include_overseas = FALSE,
+  family_type  = "NB",
+  num_changes = 5,
+  main_title = "",
+  sub_title = "Average CD4 at diagnosis with a first ever diagnosis in Australia, 2001-2024",
+  show_overall = FALSE,  # Don't show overall trend
+  show_segment = TRUE,   # Don't show segmented trends,
+  y_break = 100,    # Set y-axis breaks every 100
+  CD4 = TRUE,                
+  cd4_var = "cd4_count_diag"  
+)
+
+CD4_segmented_results$segment_results
+CD4_segmented_results$segment_plot
+CD4_segmented_results$cd4_quantile_plot
+CD4_segmented_results$overall_results
+CD4_segmented_results$bic_candidates
+CD4_segmented_results$change_points
+CD4_segmented_results$wald_adjacent_slopes
+CD4_segmented_results$overall_summary
+             
+
+#### Combined plot (CD4 JOINPOINT AND trends for different percentiles) ####
+library(grid)
+library(gtable)
+library(patchwork)
+segmented_plot_cd4 <- CD4_segmented_results$segment_plot +
+  ggtitle("",
+          subtitle = "A. Joinpoint regression, Average CD4 count at diagnosis, First ever diagnosis in Australia, 2001-2024") +
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    plot.subtitle = element_text(hjust = 0)
+  )
+
+quantile_plot_cd4 <- CD4_segmented_results$cd4_quantile_plot +
+  ggtitle("",
+          subtitle = "B. 5th, 50th, and 95th percentiles of CD4 count at diagnosis, 2001-2024") +
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    plot.subtitle = element_text(hjust = 0)
+  )
+
+# Combine with patchwork (no legend merging)
+CD4_ALL_segment_plot <-
+  wrap_plots(
+    segmented_plot_cd4,
+    quantile_plot_cd4,
+    nrow = 2
+  ) +
+  plot_layout(guides = "keep", heights = c(1, 1))
+
+#### Save figures ####
+SaveFigure <- function(folder, filename, figure, 
+    format = ".png", width = 30, 
+    height = 20, units = "cm", dpi = 600,...) {
+    ggsave(file.path(folder, paste(filename, format, sep = "")), 
+      plot = figure, width = width, height = height, units = units,dpi=dpi, ...)
+}
+# If figure not already created make sure it is not overwritten
+if (!file.exists(file.path(figFolder, "CD4_ALL_segment_plot_2001_2024_202510101.png"))) {
+  SaveFigure(figFolder,"CD4_ALL_segment_plot_2001_2024_20251010", CD4_ALL_segment_plot)
 }
 
 
@@ -2472,6 +2952,55 @@ Female_segmented_results$bic_candidates
 Female_segmented_results$change_points
 Female_segmented_results$wald_adjacent_slopes
 
+#### Late diag ####
+late_diag_segmented_results <- analyze_segmented_trend_complete(
+  data = hiv_data,
+  start_year = 2001,
+  end_year = 2024,
+  count_period = "monthly",
+  include_overseas = FALSE,
+  late_diag_filter = TRUE,
+  main_title = "",
+  sub_title = "I. HIV notifications, Late diagnosis, 2001-2024",
+  family_type = "NB",
+  num_changes = 5,
+  show_overall = FALSE,  # Don't show overall trend
+  show_segment = TRUE   # Don't show segmented trends
+)
+
+late_diag_segmented_results$segment_results
+late_diag_segmented_results$segment_plot
+late_diag_segmented_results$overall_results
+late_diag_segmented_results$bic_candidates
+late_diag_segmented_results$change_points
+late_diag_segmented_results$wald_adjacent_slopes
+
+#### Advanced diag ####
+advanced_diag_segmented_results <- analyze_segmented_trend_complete(
+  data = hiv_data,
+  start_year = 2001,
+  end_year = 2024,
+  count_period = "monthly",
+  include_overseas = FALSE,
+  advanced_diag_filter = TRUE,
+  main_title = "",
+  sub_title = "J. HIV notifications, Advanced diagnosis, 2001-2024",
+  family_type = "NB",
+  num_changes = 5,
+  show_overall = TRUE,  # Don't show overall trend
+  show_segment = FALSE   # Don't show segmented trends
+)
+
+advanced_diag_segmented_results$segment_results
+advanced_diag_segmented_results$segment_plot
+advanced_diag_segmented_results$overall_results
+advanced_diag_segmented_results$bic_candidates
+advanced_diag_segmented_results$change_points
+advanced_diag_segmented_results$wald_adjacent_slopes
+
+adv_plot_nolegend <- advanced_diag_segmented_results$segment_plot +
+  guides(color = "none", fill = "none", linetype = "none", shape = "none", alpha = "none") +
+  theme(legend.position = "none")
 
 #### Combined plot (first time diagnosed in Australia vs previously diagnosed overseas) ####
 Sub_group_segment_plot <- (
@@ -2484,21 +3013,23 @@ Sub_group_segment_plot <- (
     OB_MSM_segmented_results$segment_plot,
     Hetero_Male_segmented_results$segment_plot,
     Female_segmented_results$segment_plot,
-    nrow = 4
+    late_diag_segmented_results$segment_plot,
+    adv_plot_nolegend,
+    nrow = 5
   ) + plot_layout(guides = "collect")
 ) & theme(legend.position = "bottom")
 
 #### Save figures ####
 SaveFigure <- function(folder, filename, figure, 
     format = ".png", width = 45, 
-    height = 30, units = "cm", dpi = 600,...) {
+    height = 37.5, units = "cm", dpi = 600,...) {
     ggsave(file.path(folder, paste(filename, format, sep = "")), 
       plot = figure, width = width, height = height, units = units,dpi=dpi, ...)
 }
 
 # If figure not already created make sure it is not overwritten
-if (!file.exists(file.path(figFolder, "Sub_group_segment_plot_2001_2024_202510062.png"))) {
-  SaveFigure(figFolder,"Sub_group_segment_plot_2001_2024_20251006", Sub_group_segment_plot)
+if (!file.exists(file.path(figFolder, "Sub_group_segment_plot_2001_2024_20251010.png"))) {
+  SaveFigure(figFolder,"Sub_group_segment_plot_2001_2024_20251010", Sub_group_segment_plot)
 }
 
 if (!file.exists(file.path(figFolder, "overall_trend_plot_20250702.png"))) {
@@ -2623,7 +3154,7 @@ combine_segmented_results <- function(results_list, population_labels) {
   ))
 }
 
-# Create list of all your results
+# Create list of all results
 all_results <- list(
   segmented_results,
   PDO_segmented_results,
@@ -2843,6 +3374,100 @@ phn_lookup <- read_csv(file.path(dataFolder, "phn_sa2_20250901.csv"), col_types 
   RATIO_FROM_TO = col_double()
 ))
 
+## Build PHN lookup (code → name → state) and join to heatmap data 
+library(ggtext)  # for colored axis labels
+
+phn_to_state <- list(
+  "PHN108" = "NSW", "PHN110" = "NSW", "PHN107" = "NSW", "PHN103" = "NSW", 
+  "PHN109" = "NSW", "PHN105" = "NSW", "PHN104" = "NSW", "PHN106" = "NSW",
+  "PHN101" = "NSW", "PHN102" = "NSW",
+  "PHN202" = "VIC", "PHN204" = "VIC", "PHN203" = "VIC", "PHN201" = "VIC", 
+  "PHN206" = "VIC", "PHN205" = "VIC",
+  "PHN302" = "QLD", "PHN304" = "QLD", "PHN307" = "QLD", "PHN305" = "QLD", 
+  "PHN306" = "QLD", "PHN303" = "QLD", "PHN301" = "QLD",
+  "PHN402" = "SA", "PHN401" = "SA",
+  "PHN503" = "WA", "PHN502" = "WA", "PHN501" = "WA",
+  "PHN601" = "TAS",
+  "PHN801" = "ACT",
+  "PHN701" = "NT"
+)
+
+# Create PHN to name mapping
+phn_to_name <- list(
+  "PHN108" = "Hunter New England and Central Coast", 
+  "PHN110" = "Murrumbidgee",
+  "PHN107" = "Western NSW",
+  "PHN103" = "Western Sydney",
+  "PHN109" = "North Coast",
+  "PHN105" = "South Western Sydney",
+  "PHN104" = "Nepean Blue Mountains",
+  "PHN106" = "South Eastern NSW", 
+  "PHN101" = "Central and Eastern Sydney",
+  "PHN102" = "Northern Sydney",
+  "PHN202" = "Eastern Melbourne",
+  "PHN204" = "Gippsland",
+  "PHN203" = "South Eastern Melbourne",
+  "PHN201" = "North Western Melbourne",
+  "PHN206" = "Western Victoria",
+  "PHN205" = "Murray",
+  "PHN302" = "Brisbane South",
+  "PHN304" = "Darling Downs and West Moreton",
+  "PHN307" = "Northern Queensland",
+  "PHN305" = "Western Queensland",
+  "PHN306" = "Central Queensland, Wide Bay, Sunshine Coast",
+  "PHN303" = "Gold Coast",
+  "PHN301" = "Brisbane North",
+  "PHN402" = "Country SA",
+  "PHN401" = "Adelaide",
+  "PHN503" = "Country WA",
+  "PHN502" = "Perth South",
+  "PHN501" = "Perth North",
+  "PHN601" = "Tasmania",
+  "PHN801" = "Australian Capital Territory",
+  "PHN701" = "Northern Territory"
+)
+
+state_vec <- unlist(phn_to_state)
+
+phn_map <- tibble::tibble(
+  PHN_CODE = names(phn_to_name),
+  PHN_NAME = unname(unlist(phn_to_name))
+) |>
+  dplyr::mutate(
+    STATE    = state_vec[PHN_CODE],      
+    code_num = as.integer(sub("^PHN", "", PHN_CODE))
+  )
+
+# Order PHNs by numeric code (101, 102, ...)
+ordered_names <- phn_map |>
+  dplyr::arrange(code_num) |>
+  dplyr::pull(PHN_NAME)
+
+#Colors to use for state-coded y-axis labels
+state_cols <- c(
+  "NSW" = "#1f77b4",
+  "VIC" = "#ff7f0e",
+  "QLD" = "#2ca02c",
+  "SA"  = "#d62728",
+  "WA"  = "#9467bd",
+  "TAS" = "#8c564b",
+  "ACT" = "#e377c2",
+  "NT"  = "#7f7f7f"
+)
+
+# Build HTML-styled labels for ggtext::element_markdown()
+label_df <- phn_map |>
+  dplyr::mutate(
+    label_html = sprintf(
+      "<span style='color:%s'>%s</span>",
+      state_cols[STATE], PHN_NAME
+    )
+  )
+
+# Named vector: names = PHN_NAME, values = colored HTML labels
+y_labels <- stats::setNames(label_df$label_html, label_df$PHN_NAME)
+
+#### previously diagnosed overseas ####
 # Filter HIV data for adults and years 2001-2024
 hiv_data_filtered <- hiv_data %>%
   filter(
@@ -2850,7 +3475,7 @@ hiv_data_filtered <- hiv_data %>%
     year_diag <= 2024,
     !is.na(phn_res),
     !is.na(year_diag),
-    late_hiv_diag_flag == 1 # advanced_hiv_diag_flag cd4_50_hiv_diag_flag late_hiv_diag_flag previ_diag_overseas
+    previ_diag_overseas == 1 # advanced_hiv_diag_flag cd4_50_hiv_diag_flag late_hiv_diag_flag previ_diag_overseas
   )
 # Further filter to include only australian borns if needed
 #hiv_data_filtered <- hiv_data_filtered %>%
@@ -2921,6 +3546,197 @@ hiv_heatmap_df <- hiv_case_rates %>%
 # Create log-transformed case rate
 hiv_heatmap_df$case_rate_log <- log10(hiv_heatmap_df$case_rate + 1)
 
+hiv_heatmap_df <- hiv_heatmap_df |>
+  dplyr::left_join(
+    phn_map |>
+      dplyr::select(PHN_NAME, PHN_CODE, STATE, code_num),
+    by = "PHN_NAME"
+  )
+# Define breaks and colors for HIV case rates per 100k
+# Adjust these based on actual data range
+#scale_breaks <- c(0, 1, 2, 4, 6, 10, 15, 20)
+#scale_colors <- c("#FFFFCC", "#C7E9B4", "#7FCDBB", "#41B6C4", "#1D91C0", "#225EA8", "#0C2C84", "#081D58")
+
+scale_colors <- c("#FFFFCC", "#C7E9B4", "#7FCDBB", "#41B6C4", "#1D91C0", "#225EA8", "#0C2C84", "#081D58")
+scale_breaks <- c(0, 1, 2, 3,4,5)
+
+
+# Transformed breaks for legend positions
+log_breaks <- log10(scale_breaks + 1)
+
+
+#### Gradient version normal scale####
+p_timeseries_phn_2001_24_20250901_gradient <- ggplot(
+  hiv_heatmap_df,
+  aes(x = year, y = factor(PHN_NAME, levels = rev(ordered_names)), fill = case_rate)
+) +
+  geom_tile(color = "white", size = 0.2) +
+  scale_fill_gradientn(
+    colors = scale_colors,
+    breaks = scale_breaks,
+    labels = scale_breaks,
+    name = "Notifications\nper 100,000"
+  ) +
+  # Use our HTML labels
+  scale_y_discrete(
+    limits = rev(ordered_names),
+    labels = y_labels[rev(ordered_names)]
+  ) +
+  scale_x_continuous(breaks = seq(2001, 2024, by = 5)) +
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 10),
+    # IMPORTANT: markdown to render colored labels
+    axis.text.y = ggtext::element_markdown(size = 8),
+    plot.title = element_text(size = 16, face = "bold"),
+    plot.subtitle = element_text(size = 12),
+    legend.position = "right",
+    legend.title = element_text(size = 10),
+    axis.title = element_text(size = 12)
+  ) +
+  labs(
+    title = "",
+    subtitle = "B. Notification rates, Previously diagnosed overseas, 2001-2024",
+    x = "Year",
+    y = "Primary Health Network"
+  ) +
+  # Vertical lines for milestones
+  geom_vline(xintercept = 2020, lwd = 1.2, color = "#cf0a66") +
+  geom_vline(xintercept = 2016, lwd = 1.2, color = "#cf0a66")
+
+print(p_timeseries_phn_2001_24_20250901_gradient)
+
+# Ensure state order is fixed
+state_order <- c("NSW", "VIC", "QLD", "SA", "WA", "TAS", "NT", "ACT")
+
+state_legend_df <- tibble::tibble(
+  STATE = factor(state_order, levels = state_order)
+)
+
+# Add invisible points to trigger legend
+p_timeseries_phn_2001_24_20250901_gradient <-
+  p_timeseries_phn_2001_24_20250901_gradient +
+  geom_point(
+    data = state_legend_df,
+    aes(x = 2001, y = ordered_names[1], color = STATE),
+    inherit.aes = FALSE,
+    alpha = 0, size = 3
+  ) +
+  # Manual color scale in correct order
+  scale_color_manual(
+    values = state_cols[state_order],
+    name   = "State"
+  ) +
+  # Stack legends vertically: colorbar first, then states
+  guides(
+    fill = guide_colorbar(order = 1),
+    color = guide_legend(
+      order = 2,
+      override.aes = list(alpha = 1, size = 4),
+      direction = "vertical",     # vertical order top→bottom
+      title.position = "top"
+    )
+  ) +
+  theme(
+    legend.box = "vertical",
+    legend.box.just = "left",
+    legend.spacing.y = unit(4, "pt"),
+    legend.direction = "vertical",
+    legend.position = "right",
+    legend.justification = "top"
+  )
+
+print(p_timeseries_phn_2001_24_20250901_gradient)
+pdo <- p_timeseries_phn_2001_24_20250901_gradient
+
+
+
+#### first ever diagnosed in Australia ####
+# Filter HIV data for adults and years 2001-2024
+hiv_data_filtered <- hiv_data %>%
+  filter(
+    year_diag >= 2001,
+    year_diag <= 2024,
+    !is.na(phn_res),
+    !is.na(year_diag),
+    previ_diag_overseas == 0 # advanced_hiv_diag_flag cd4_50_hiv_diag_flag late_hiv_diag_flag previ_diag_overseas
+  )
+# Further filter to include only australian borns if needed
+#hiv_data_filtered <- hiv_data_filtered %>%
+#  filter(
+#    au_birth == "Australia"
+#  )
+
+# Step 1: Transform population data from wide to long format
+pop_sa2_long <- pop_sa2_yearly %>%
+  pivot_longer(
+    cols = starts_with("pop_size_"),
+    names_to = "year",
+    values_to = "pop_size",
+    names_prefix = "pop_size_"
+  ) %>%
+  mutate(year = as.numeric(year)) %>%
+  filter(year >= 2001, year <= 2024)
+
+# Step 2: Calculate PHN population for each year
+phn_pop_yearly <- pop_sa2_long %>%
+  inner_join(phn_lookup, by = "SA2_CODE21",relationship = "many-to-many") %>%
+  mutate(
+    pop_alloc = pop_size * RATIO_FROM_TO
+  ) %>%
+  filter(!is.na(PHN_CODE)) %>%
+  group_by(PHN_CODE, PHN_NAME, year) %>%
+  summarise(
+    total_pop = sum(pop_alloc, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+yearly_totals <- phn_pop_yearly %>%
+  group_by(year) %>%
+  summarise(
+    total_australia_pop = sum(total_pop, na.rm = TRUE),
+    num_phns = n_distinct(PHN_CODE),
+    .groups = "drop"
+  ) %>%
+  arrange(year)
+
+
+# Step 3: Calculate HIV cases by PHN and year
+hiv_cases_yearly <- hiv_data_filtered %>%
+  group_by(phn_res, phn_name, year_diag) %>%
+  summarise(
+    hiv_cases = n(),
+    .groups = "drop"
+  ) %>%
+  rename(
+    PHN_CODE = phn_res,
+    PHN_NAME = phn_name,
+    year = year_diag
+  )
+
+# Step 4: Join HIV cases with population data and calculate rates
+hiv_case_rates <- phn_pop_yearly %>%
+  left_join(hiv_cases_yearly, by = c("PHN_CODE", "PHN_NAME", "year")) %>%
+  mutate(
+    hiv_cases = ifelse(is.na(hiv_cases), 0, hiv_cases),
+    case_rate_per_100k = (hiv_cases / total_pop) * 100000
+  ) %>%
+  # Filter out any PHNs with zero population (data quality check)
+  filter(total_pop > 0)
+
+hiv_heatmap_df <- hiv_case_rates %>%
+  dplyr::select(PHN_NAME, year, case_rate = case_rate_per_100k)
+
+# Create log-transformed case rate
+hiv_heatmap_df$case_rate_log <- log10(hiv_heatmap_df$case_rate + 1)
+
+hiv_heatmap_df <- hiv_heatmap_df |>
+  dplyr::left_join(
+    phn_map |>
+      dplyr::select(PHN_NAME, PHN_CODE, STATE, code_num),
+    by = "PHN_NAME"
+  )
 # Define breaks and colors for HIV case rates per 100k
 # Adjust these based on actual data range
 #scale_breaks <- c(0, 1, 2, 4, 6, 10, 15, 20)
@@ -2932,21 +3748,30 @@ scale_breaks <- c(0, 5, 10, 15,20,25)
 # Transformed breaks for legend positions
 log_breaks <- log10(scale_breaks + 1)
 
-
 #### Gradient version normal scale####
-p_timeseries_phn_2001_24_20250901_gradient <- ggplot(hiv_heatmap_df, aes(x = year, y = PHN_NAME, fill = case_rate)) +
+p_timeseries_phn_2001_24_20250901_gradient <- ggplot(
+  hiv_heatmap_df,
+  aes(x = year, y = factor(PHN_NAME, levels = rev(ordered_names)), fill = case_rate)
+) +
   geom_tile(color = "white", size = 0.2) +
   scale_fill_gradientn(
     colors = scale_colors,
     breaks = scale_breaks,
     labels = scale_breaks,
-    name = "Cases per\n100,000"
+    name = "Notifications\nper 100,000"
   ) +
+  # Use our HTML labels
+  scale_y_discrete(
+    limits = rev(ordered_names),
+    labels = y_labels[rev(ordered_names)]
+  ) +
+  scale_x_continuous(breaks = seq(2001, 2024, by = 5)) +
   theme_minimal() +
   theme(
     panel.grid = element_blank(),
     axis.text.x = element_text(angle = 45, hjust = 1, size = 10),
-    axis.text.y = element_text(size = 8),
+    # IMPORTANT: markdown to render colored labels
+    axis.text.y = ggtext::element_markdown(size = 8),
     plot.title = element_text(size = 16, face = "bold"),
     plot.subtitle = element_text(size = 12),
     legend.position = "right",
@@ -2954,25 +3779,203 @@ p_timeseries_phn_2001_24_20250901_gradient <- ggplot(hiv_heatmap_df, aes(x = yea
     axis.title = element_text(size = 12)
   ) +
   labs(
-    title = "HIV Notification Rates by Primary Health Network",
-    subtitle = "Late HIV diagnoses",
+    title = "",
+    subtitle = "A. Notification rates, First ever diagnosed in Australia, 2001-2024",
     x = "Year",
     y = "Primary Health Network"
   ) +
-  scale_y_discrete(limits = rev) +
-  scale_x_continuous(breaks = seq(2001, 2024, by = 5)) +
-  # Add vertical lines for significant HIV milestones
-  geom_vline(xintercept = 2020, lwd = 1.2, color = "#cf0a66") +  # PrEP approval
-  geom_vline(xintercept = 2016, lwd = 1.2, color = "#cf0a66")    # UNAIDS 90-90-90 targets
+  # Vertical lines for milestones
+  geom_vline(xintercept = 2020, lwd = 1.2, color = "#cf0a66") +
+  geom_vline(xintercept = 2016, lwd = 1.2, color = "#cf0a66")
 
 # Display the plot
 print(p_timeseries_phn_2001_24_20250901_gradient)
 
-if (!file.exists(file.path(figFolder, "late_gradient_p_timeseries_phn_2001_24_20250926.png"))) {
-    SaveFigure(figFolder,"late_gradient_p_timeseries_phn_2001_24_20250926", p_timeseries_phn_2001_24_20250901_gradient)
+# Ensure state order is fixed
+state_order <- c("NSW", "VIC", "QLD", "SA", "WA", "TAS", "NT", "ACT")
+
+state_legend_df <- tibble::tibble(
+  STATE = factor(state_order, levels = state_order)
+)
+
+# Add invisible points to trigger legend
+p_timeseries_phn_2001_24_20250901_gradient <-
+  p_timeseries_phn_2001_24_20250901_gradient +
+  geom_point(
+    data = state_legend_df,
+    aes(x = 2001, y = ordered_names[1], color = STATE),
+    inherit.aes = FALSE,
+    alpha = 0, size = 3
+  ) +
+  # Manual color scale in correct order
+  scale_color_manual(
+    values = state_cols[state_order],
+    name   = "State"
+  ) +
+  # Stack legends vertically: colorbar first, then states
+  guides(
+    fill = guide_colorbar(order = 1),
+    color = guide_legend(
+      order = 2,
+      override.aes = list(alpha = 1, size = 4),
+      direction = "vertical",     # vertical order top→bottom
+      title.position = "top"
+    )
+  ) +
+  theme(
+    legend.box = "vertical",
+    legend.box.just = "left",
+    legend.spacing.y = unit(4, "pt"),
+    legend.direction = "vertical",
+    legend.position = "right",
+    legend.justification = "top"
+  )
+
+print(p_timeseries_phn_2001_24_20250901_gradient)
+fed <- p_timeseries_phn_2001_24_20250901_gradient 
+
+library(patchwork)
+combined_plot_phn_hiv_rates_2001_24 <- ( fed + pdo ) + plot_layout(heights = c(1, 1))
+
+####save figure for combined plot####
+SaveFigure <- function(folder, filename, figure, 
+    format = ".png", width = 25, 
+    height = 25, units = "cm", dpi = 600,...) {
+    ggsave(file.path(folder, paste(filename, format, sep = "")), 
+      plot = figure, width = width, height = height, units = units,dpi=dpi, ...)
 }
 
-####save figure####
+if (!file.exists(file.path(figFolder, "combined_plot_phn_hiv_rates_2001_24_20251010.png"))) {
+    SaveFigure(figFolder,"combined_plot_phn_hiv_rates_2001_24_20251010", combined_plot_phn_hiv_rates_2001_24)
+}
+
+#### Average CD4 count (First ever diagnosed in Australia) ####
+# Filter
+cd4_data_filtered <- hiv_data %>%
+  dplyr::filter(
+    year_diag >= 2001,
+    year_diag <= 2024,
+    !is.na(phn_res),
+    !is.na(year_diag),
+    previ_diag_overseas == 0
+  )
+
+# Optional small-cell masking threshold (set to 1 to effectively disable)
+min_n <- 1
+
+# Mean CD4 by PHN x year (and sample size) 
+cd4_mean_yearly <- cd4_data_filtered %>%
+  dplyr::group_by(PHN_CODE = phn_res, PHN_NAME = phn_name, year = year_diag) %>%
+  dplyr::summarise(
+    mean_cd4 = mean(cd4_count_diag, na.rm = TRUE),
+    n = sum(!is.na(cd4_count_diag)),
+    .groups = "drop"
+  ) %>%
+  dplyr::mutate(
+    mean_cd4 = ifelse(n < min_n, NA_real_, mean_cd4)  # mask small cells
+  )
+
+# Complete grid to ensure rectangular heatmap
+all_phn_years <- tidyr::expand_grid(
+  PHN_NAME = ordered_names,
+  year = 2001:2024
+)
+
+cd4_heatmap_df <- all_phn_years %>%
+  dplyr::left_join(
+    cd4_mean_yearly %>% dplyr::select(PHN_NAME, year, mean_cd4),
+    by = c("PHN_NAME", "year")
+  ) %>%
+  dplyr::left_join(
+    phn_map %>% dplyr::select(PHN_NAME, STATE, code_num),
+    by = "PHN_NAME"
+  )
+
+# Limits & breaks: lower from data (rounded), upper fixed at 500; squish >500 to top color 
+cd4_min <- suppressWarnings(min(cd4_heatmap_df$mean_cd4, na.rm = TRUE))
+cd4_low <- if (is.finite(cd4_min)) floor(cd4_min / 50) * 50 else 0
+cd4_high <- 500
+if (cd4_low >= cd4_high) cd4_low <- cd4_high - 50  # safety if all values >= 500
+
+cd4_limits <- c(cd4_low, cd4_high)
+cd4_breaks <- unique(sort(c(pretty(cd4_limits, n = 5), cd4_high)))
+label_ge500 <- function(x) ifelse(x == cd4_high, "≥500", formatC(x, format = "f", digits = 0))
+
+scale_colors <- c("#FFFFCC", "#C7E9B4", "#7FCDBB", "#41B6C4", "#1D91C0", "#225EA8", "#0C2C84", "#081D58")
+
+# Plot: mean CD4 heatmap with palette & state legend stacked under colorbar
+p_cd4_mean_fed <- ggplot(
+  cd4_heatmap_df,
+  aes(x = year, y = factor(PHN_NAME, levels = rev(ordered_names)), fill = mean_cd4)
+) +
+  geom_tile(color = "white", size = 0.2) +
+  scale_fill_gradientn(
+    colors = scale_colors,          # palette
+    limits = cd4_limits,            # lower data-driven, upper fixed at 500
+    oob = scales::squish,           # >500 uses top color
+    na.value = "grey92",
+    breaks = cd4_breaks,
+    labels = label_ge500,
+    name = "Mean CD4\n(cells/μL)"
+  ) +
+  scale_y_discrete(
+    limits = rev(ordered_names),
+    labels = y_labels[rev(ordered_names)]   # state-colored y labels
+  ) +
+  scale_x_continuous(breaks = seq(2001, 2024, by = 5)) +
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 10),
+    axis.text.y = ggtext::element_markdown(size = 8),
+    plot.title = element_text(size = 16, face = "bold"),
+    plot.subtitle = element_text(size = 12),
+    legend.position = "right",
+    legend.title = element_text(size = 10),
+    axis.title = element_text(size = 12),
+    legend.box = "vertical",
+    legend.box.just = "left",
+    legend.spacing.y = unit(4, "pt"),
+    legend.direction = "vertical",
+    legend.justification = "top"
+  ) +
+  labs(
+    title = "",
+    subtitle = "Mean CD4 at diagnosis, First ever diagnosed in Australia, 2001–2024",
+    x = "Year",
+    y = "Primary Health Network" #,
+#    caption = paste0("Cells with n<", min_n, " masked as NA (shown in grey).")
+  ) +
+  # Milestones
+  geom_vline(xintercept = 2020, lwd = 1.2, color = "#cf0a66") +
+  geom_vline(xintercept = 2016, lwd = 1.2, color = "#cf0a66")
+
+#Add vertical State legend (dots) under colorbar
+state_order <- c("NSW", "VIC", "QLD", "SA", "WA", "TAS", "NT", "ACT")
+state_legend_df <- tibble::tibble(STATE = factor(state_order, levels = state_order))
+
+p_cd4_mean_fed <- p_cd4_mean_fed +
+  geom_point(
+    data = state_legend_df,
+    aes(x = 2001, y = ordered_names[1], color = STATE),
+    inherit.aes = FALSE,
+    alpha = 0, size = 3
+  ) +
+  scale_color_manual(values = state_cols[state_order], name = "State") +
+  guides(
+    fill = guide_colorbar(order = 1),
+    color = guide_legend(
+      order = 2,
+      override.aes = list(alpha = 1, size = 4),
+      direction = "vertical",
+      title.position = "top"
+    )
+  )
+
+# Display
+print(p_cd4_mean_fed)
+
+####save figure for single plot####
 SaveFigure <- function(folder, filename, figure, 
     format = ".png", width = 25, 
     height = 12.5, units = "cm", dpi = 600,...) {
@@ -2981,9 +3984,11 @@ SaveFigure <- function(folder, filename, figure,
 }
 
 # If figure not already created make sure it is not overwritten
-if (!file.exists(file.path(figFolder, "p_timeseries_phn_2001_24_20250902_viridis.png"))) {
-    SaveFigure(figFolder,"p_timeseries_phn_2001_24_20250902_viridis", p_timeseries_phn_2001_24_20250901_viridis)
+if (!file.exists(file.path(figFolder, "p_cd4_mean_fed_2001_24_202510101.png"))) {
+    SaveFigure(figFolder,"p_cd4_mean_fed_2001_24_20251010", p_cd4_mean_fed)
 }
+
+tre
 
 
 
