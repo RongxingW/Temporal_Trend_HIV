@@ -17,13 +17,13 @@ library(readr)        # For reading CSV files
 library(tidyverse)    # For data manipulation and plotting
 library(sf)           # For reading and handling spatial data
 library(spdep)        # For spatial analysis, including Getis-Ord Gi*
-library(tmap)         # For thematic mapping
 library(epitools)     # For potential rate calculations (if needed)
 library(janitor)      # For data cleaning
 library(lubridate)    # For date manipulation
 #library(knitr)        # For creating tables
 library(kableExtra)   # For table formatting
 library(dplyr)         # For data manipulation
+library(ineq)
 
 # Source to current directory and set working directory
 basePath <- getwd()
@@ -488,8 +488,8 @@ rainbow_all$summary_data_complete
 rainbow_all_percentage_plot <- rainbow_all$p + theme(legend.position = "none")
 print(rainbow_all)
 
-if (!file.exists(file.path(resultsFolder, "rainbow_plot_prop_20250926.csv"))) {
-write.csv(rainbow_all$summary_data_complete, file.path(resultsFolder, "rainbow_plot_prop_20250926.csv"), row.names=FALSE)
+if (!file.exists(file.path(resultsFolder, "rainbow_plot_prop_20251104.csv"))) {
+write.csv(rainbow_all$summary_data_complete, file.path(resultsFolder, "rainbow_plot_prop_20251104.csv"), row.names=FALSE)
 }
 
 # Filter data for specific population 
@@ -1232,6 +1232,7 @@ get_trend_data <- function(data,
                            place_acq_filter = NULL,      # place_acq
                            state_res_filter = NULL,      # state_res
                            phn_res_filter = NULL,        # phn_res
+                           cd4_count_filter = NULL,     # cd4_count_diag
                            count_period = "monthly",     # "monthly", "quarterly", or "annually"
                            late_diag_filter = NULL,      # late_hiv_diag_flag\
                            advanced_diag_filter = NULL,       # advanced_hiv_diag_flag
@@ -1306,6 +1307,12 @@ get_trend_data <- function(data,
   if (!is.null(phn_res_filter)) {
     plot_data <- plot_data %>% 
       filter(phn_res == phn_res_filter)
+  }
+  
+  # cd4 count at diagnosis
+  if (!is.null(cd4_count_filter)) {
+    plot_data <- plot_data %>% 
+      filter(cd4_count_diag %in% cd4_count_filter)
   }
   
   # late HIV diagnosis
@@ -1766,6 +1773,7 @@ analyze_overall_trend <- function(data,
                                place_acq_filter = NULL,     # place_acq
                                state_res_filter = NULL,     # state_res
                                phn_res_filter = NULL,       # phn_res
+                               cd4_count_filter = NULL,     # cd4_count_diag
                                late_diag_filter = NULL,      # late_hiv_diag_flag
                                advanced_diag_filter = NULL,       # advanced_hiv_diag_flag
                                count_period = "monthly",    # "monthly", "quarterly", or "annually"
@@ -1795,6 +1803,7 @@ analyze_overall_trend <- function(data,
     place_acq_filter = place_acq_filter,
     state_res_filter = state_res_filter,
     phn_res_filter = phn_res_filter,
+    cd4_count_filter = cd4_count_filter,
     count_period = count_period,
     include_overseas = include_overseas,
     late_diag_filter = late_diag_filter,
@@ -2294,6 +2303,7 @@ analyze_segmented_trend_complete <- function(data,
                                              place_acq_filter = NULL,
                                              state_res_filter = NULL,
                                              phn_res_filter = NULL,
+                                             cd4_count_filter = NULL,     # cd4_count_diag
                                              late_diag_filter = NULL,
                                              advanced_diag_filter = NULL,
                                              count_period = "monthly",
@@ -2322,6 +2332,7 @@ analyze_segmented_trend_complete <- function(data,
     place_acq_filter = place_acq_filter,
     state_res_filter = state_res_filter,
     phn_res_filter = phn_res_filter,
+    cd4_count_filter = cd4_count_filter,
     count_period = count_period,
     include_overseas = include_overseas,
     late_diag_filter = late_diag_filter,
@@ -2773,7 +2784,7 @@ AB_segmented_results <- analyze_segmented_trend_complete(
   include_overseas = FALSE,
   au_birth_filter = "Australia",
   main_title = "",
-  sub_title = "A. HIV notifications, Australian-born, 2001-2024",
+  sub_title = "A. Australian-born, 2001-2024",
   family_type = "NB",
   num_changes = 5,
   show_overall = FALSE,  # Don't show overall trend
@@ -2796,7 +2807,7 @@ OB_segmented_results <- analyze_segmented_trend_complete(
   include_overseas = FALSE,
   au_birth_filter = "Overseas",
   main_title = "",
-  sub_title = "B. HIV notifications, Overseas-born, 2001-2024",
+  sub_title = "B. Overseas-born, 2001-2024",
   family_type = "NB",
   num_changes = 5,
   show_overall = FALSE,  # Don't show overall trend
@@ -2820,7 +2831,7 @@ AB_MSM_segmented_results <- analyze_segmented_trend_complete(
   au_birth_filter = "Australia",
   exposure_filter = c("MSM", "MSMIDU"),
   main_title = "",
-  sub_title = "E. HIV notifications, Australian-born MSM, 2001-2024",
+  sub_title = "E. Australian-born MSM, 2001-2024",
   family_type = "NB",
   num_changes = 5,
   show_overall = FALSE,  # Don't show overall trend
@@ -2844,7 +2855,7 @@ OB_MSM_segmented_results <- analyze_segmented_trend_complete(
   au_birth_filter = "Overseas",
   exposure_filter = c("MSM", "MSMIDU"),
   main_title = "",
-  sub_title = "F. HIV notifications, Overseas-born MSM, 2001-2024",
+  sub_title = "F. Overseas-born MSM, 2001-2024",
   family_type = "NB",
   num_changes = 5,
   show_overall = FALSE,  # Don't show overall trend
@@ -2867,7 +2878,7 @@ MSM_segmented_results <- analyze_segmented_trend_complete(
   include_overseas = FALSE,
   exposure_filter = c("MSM", "MSMIDU"),
   main_title = "",
-  sub_title = "C. HIV notifications, MSM, 2001-2024",
+  sub_title = "C. MSM, 2001-2024",
   family_type = "NB",
   num_changes = 5,
   show_overall = FALSE,  # Don't show overall trend
@@ -2890,7 +2901,7 @@ Hetero_segmented_results <- analyze_segmented_trend_complete(
   include_overseas = FALSE,
   exposure_filter = c("Hetero"),
   main_title = "",
-  sub_title = "D. HIV notifications, Heterosexual, 2001-2024",
+  sub_title = "D. Heterosexual, 2001-2024",
   family_type = "NB",
   num_changes = 5,
   show_overall = FALSE,  # Don't show overall trend
@@ -2914,7 +2925,7 @@ Hetero_Male_segmented_results <- analyze_segmented_trend_complete(
   include_overseas = FALSE,
   exposure_filter = c("Hetero"),
   main_title = "",
-  sub_title = "G. HIV notifications, Heterosexual men, 2001-2024",
+  sub_title = "G. Heterosexual men, 2001-2024",
   gender_filter = "Male",
   family_type = "NB",
   num_changes = 5,
@@ -2938,7 +2949,7 @@ Female_segmented_results <- analyze_segmented_trend_complete(
   include_overseas = FALSE,
   gender_filter = "Female",
   main_title = "",
-  sub_title = "H. HIV notifications, Women, 2001-2024",
+  sub_title = "H. Women, 2001-2024",
   family_type = "NB",
   num_changes = 5,
   show_overall = FALSE,  # Don't show overall trend
@@ -2961,7 +2972,7 @@ late_diag_segmented_results <- analyze_segmented_trend_complete(
   include_overseas = FALSE,
   late_diag_filter = TRUE,
   main_title = "",
-  sub_title = "I. HIV notifications, Late diagnosis, 2001-2024",
+  sub_title = "I. Late diagnosis, 2001-2024",
   family_type = "NB",
   num_changes = 5,
   show_overall = FALSE,  # Don't show overall trend
@@ -2984,7 +2995,7 @@ advanced_diag_segmented_results <- analyze_segmented_trend_complete(
   include_overseas = FALSE,
   advanced_diag_filter = TRUE,
   main_title = "",
-  sub_title = "J. HIV notifications, Advanced diagnosis, 2001-2024",
+  sub_title = "J. Advanced diagnosis, 2001-2024",
   family_type = "NB",
   num_changes = 5,
   show_overall = TRUE,  # Don't show overall trend
@@ -3014,7 +3025,6 @@ Sub_group_segment_plot <- (
     Hetero_Male_segmented_results$segment_plot,
     Female_segmented_results$segment_plot,
     late_diag_segmented_results$segment_plot,
-    adv_plot_nolegend,
     nrow = 5
   ) + plot_layout(guides = "collect")
 ) & theme(legend.position = "bottom")
@@ -3028,8 +3038,8 @@ SaveFigure <- function(folder, filename, figure,
 }
 
 # If figure not already created make sure it is not overwritten
-if (!file.exists(file.path(figFolder, "Sub_group_segment_plot_2001_2024_20251010.png"))) {
-  SaveFigure(figFolder,"Sub_group_segment_plot_2001_2024_20251010", Sub_group_segment_plot)
+if (!file.exists(file.path(figFolder, "Sub_group_segment_plot_2001_2024_20251118.png"))) {
+  SaveFigure(figFolder,"Sub_group_segment_plot_2001_2024_20251118", Sub_group_segment_plot)
 }
 
 if (!file.exists(file.path(figFolder, "overall_trend_plot_20250702.png"))) {
@@ -3067,6 +3077,178 @@ if (!file.exists(file.path(figFolder, "MSM_changing_point_plot_20250910.png"))) 
 if (!file.exists(file.path(figFolder, "Hetero_changing_point_plot_20250910.png"))) {
   SaveFigure(figFolder,"Hetero_changing_point_plot_20250910", Hetero_segmented_results$segment_plot)
 }
+
+
+#### CD4 STRATIFIED ANALYSIS ####
+# <200
+g200_segmented_results <- analyze_segmented_trend_complete(
+  data = hiv_data,
+  start_year = 2001,
+  end_year = 2024,
+  advanced_diag_filter = TRUE,
+  count_period = "monthly",
+  include_overseas = FALSE,
+  family_type  = "NB",
+  num_changes = 5,
+  main_title = "",
+  sub_title = "A. CD4 count <200",
+  show_overall = FALSE,  # Don't show overall trend
+  show_segment = TRUE
+)
+
+
+g200_segmented_results$segment_results
+g200_segmented_results$segment_plot
+g200_segmented_results$overall_results
+g200_segmented_results$bic_candidates
+g200_segmented_results$change_points
+g200_segmented_results$wald_adjacent_slopes
+
+# 200-<350
+g200_350_segmented_results <- analyze_segmented_trend_complete(
+  data = hiv_data,
+  start_year = 2001,
+  end_year = 2024,
+  cd4_count_filter = c(200:349),
+  late_diag_filter = TRUE,
+  count_period = "monthly",
+  include_overseas = FALSE,
+  family_type  = "NB",
+  num_changes = 5,
+  main_title = "",
+  sub_title = "B. CD4 count 200-349",
+  show_overall = FALSE,  # Don't show overall trend
+  show_segment = TRUE
+)
+
+
+g200_350_segmented_results$segment_results
+g200_350_segmented_results$segment_plot
+g200_350_segmented_results$overall_results
+g200_350_segmented_results$bic_candidates
+g200_350_segmented_results$change_points
+g200_350_segmented_results$wald_adjacent_slopes
+
+# 350-<500
+g350_500_segmented_results <- analyze_segmented_trend_complete(
+  data = hiv_data,
+  start_year = 2001,
+  end_year = 2024,
+  cd4_count_filter = c(350:499),
+  count_period = "monthly",
+  include_overseas = FALSE,
+  family_type  = "NB",
+  num_changes = 5,
+  main_title = "",
+  sub_title = "C. CD4 count 350-499",
+  show_overall = FALSE,  # Don't show overall trend
+  show_segment = TRUE
+)
+
+
+g350_500_segmented_results$segment_results
+g350_500_segmented_results$segment_plot
+g350_500_segmented_results$overall_results
+g350_500_segmented_results$bic_candidates
+g350_500_segmented_results$change_points
+g350_500_segmented_results$wald_adjacent_slopes
+
+# 500+
+g500_segmented_results <- analyze_segmented_trend_complete(
+  data = hiv_data,
+  start_year = 2001,
+  end_year = 2024,
+  cd4_count_filter = c(50:200000),
+  count_period = "monthly",
+  include_overseas = FALSE,
+  family_type  = "NB",
+  num_changes = 5,
+  main_title = "",
+  sub_title = "D. CD4 count 500+",
+  show_overall = FALSE,  # Don't show overall trend
+  show_segment = TRUE
+)
+
+
+g500_segmented_results$segment_results
+g500_segmented_results$segment_plot
+g500_segmented_results$overall_results
+g500_segmented_results$bic_candidates
+g500_segmented_results$change_points
+g500_segmented_results$wald_adjacent_slopes
+
+# seroconversion <350
+gsero_segmented_results <- analyze_segmented_trend_complete(
+  data = hiv_data,
+  start_year = 2001,
+  end_year = 2024,
+  cd4_count_filter = c(0:349),
+  late_diag_filter = FALSE,
+  count_period = "monthly",
+  include_overseas = FALSE,
+  family_type  = "NB",
+  num_changes = 5,
+  main_title = "",
+  sub_title = "E. Seroconversion with CD4 count <350",
+  show_overall = FALSE,  # Don't show overall trend
+  show_segment = TRUE
+)
+
+
+gsero_segmented_results$segment_results
+gsero_segmented_results$segment_plot
+gsero_segmented_results$overall_results
+gsero_segmented_results$bic_candidates
+gsero_segmented_results$change_points
+gsero_segmented_results$wald_adjacent_slopes
+
+#unknown CD4
+gunknown_segmented_results <- analyze_segmented_trend_complete(
+  data = hiv_data,
+  start_year = 2001,
+  end_year = 2024,
+  cd4_count_filter = NA,
+  count_period = "monthly",
+  include_overseas = FALSE,
+  family_type  = "NB",
+  num_changes = 5,
+  main_title = "",
+  sub_title = "F. Unknown CD4 count",
+  show_overall = FALSE,  # Don't show overall trend
+  show_segment = TRUE
+)
+
+gunknown_segmented_results$segment_results
+gunknown_segmented_results$segment_plot
+
+
+#### Combined plot (first time diagnosed in Australia vs previously diagnosed overseas) ####
+library(patchwork)
+cd4_group_segment_plot <- (
+  wrap_plots(
+    g200_segmented_results$segment_plot,
+    g200_350_segmented_results$segment_plot,
+    g350_500_segmented_results$segment_plot,
+    g500_segmented_results$segment_plot,
+    gsero_segmented_results$segment_plot,
+    gunknown_segmented_results$segment_plot,
+    nrow = 3
+  ) + plot_layout(guides = "collect")
+) & theme(legend.position = "bottom")
+
+#### Save figures ####
+SaveFigure <- function(folder, filename, figure, 
+    format = ".png", width = 45, 
+    height = 22.5, units = "cm", dpi = 600,...) {
+    ggsave(file.path(folder, paste(filename, format, sep = "")), 
+      plot = figure, width = width, height = height, units = units,dpi=dpi, ...)
+}
+
+# If figure not already created make sure it is not overwritten
+if (!file.exists(file.path(figFolder, "cd4_group_segment_plot_2001_2024_202511181.png"))) {
+  SaveFigure(figFolder,"cd4_group_segment_plot_2001_2024_20251118", cd4_group_segment_plot)
+}
+
 
 
 #### Export results to CSV files ####
@@ -3165,7 +3347,9 @@ all_results <- list(
   MSM_segmented_results,
   Hetero_segmented_results,
   Hetero_Male_segmented_results,
-  Female_segmented_results
+  Female_segmented_results,
+  late_diag_segmented_results,
+  advanced_diag_segmented_results
 )
 
 # Create corresponding population labels
@@ -3179,7 +3363,9 @@ population_labels <- c(
   "MSM",
   "Heterosexual",
   "Heterosexual men",
-  "Women"
+  "Women",
+  "Late diagnosis",
+  "Advanced diagnosis"
 )
 
 # Combine all results
@@ -3192,25 +3378,62 @@ combined_results$change_points
 combined_results$wald_adjacent_slopes
 combined_results$overall_summary
 
+# cd4 list
+cd4_results <- list(
+  g200_segmented_results,
+  g200_350_segmented_results,
+  g350_500_segmented_results,
+  g500_segmented_results,
+  gsero_segmented_results,
+  gunknown_segmented_results
+)
+
+# cd4_population_labels
+cd4_population_labels <- c(
+  "CD4 <200",
+  "CD4 200-349",
+  "CD4 350-499",
+  "CD4 500+",
+  "Seroconversion with CD4 <350",
+  "Unknown CD4 at diagnosis"
+)
+
+# cd4_combined_results
+cd4_combined_results <- combine_segmented_results(cd4_results, cd4_population_labels)
 
 # If file not already created make sure it is not overwritten
-if (!file.exists(file.path(resultsFolder, "combined_each_slope_results_20251006.csv"))) {
-write.csv(combined_results$segment_results, file.path(resultsFolder, "combined_each_slope_results_20251006.csv"), row.names=TRUE)
+if (!file.exists(file.path(resultsFolder, "combined_each_slope_results_20251104.csv"))) {
+write.csv(combined_results$segment_results, file.path(resultsFolder, "combined_each_slope_results_20251104.csv"), row.names=TRUE)
 }
-if (!file.exists(file.path(resultsFolder, "combined_aapc_each_results_20251006.csv"))) {
-write.csv(combined_results$overall_summary, file.path(resultsFolder, "combined_aapc_each_results_20251006.csv"), row.names=TRUE)
+if (!file.exists(file.path(resultsFolder, "combined_aapc_each_results_20251104.csv"))) {
+write.csv(combined_results$overall_summary, file.path(resultsFolder, "combined_aapc_each_results_202511041.csv"), row.names=TRUE)
 }
-if (!file.exists(file.path(resultsFolder, "combined_bic_results_20251006.csv"))) {
-write.csv(combined_results$bic_candidates, file.path(resultsFolder, "combined_bic_results_20251006.csv"), row.names=TRUE)
+if (!file.exists(file.path(resultsFolder, "combined_bic_results_20251104.csv"))) {
+write.csv(combined_results$bic_candidates, file.path(resultsFolder, "combined_bic_results_20251104.csv"), row.names=TRUE)
 }
-if (!file.exists(file.path(resultsFolder, "combined_change_points_results_20251006.csv"))) {
-write.csv(combined_results$change_points, file.path(resultsFolder, "combined_change_points_results_20251006.csv"), row.names=TRUE)
+if (!file.exists(file.path(resultsFolder, "combined_change_points_results_20251104.csv"))) {
+write.csv(combined_results$change_points, file.path(resultsFolder, "combined_change_points_results_20251104.csv"), row.names=TRUE)
 }
-if (!file.exists(file.path(resultsFolder, "combined_wald_adjacent_slopes_results_20251006.csv"))) {
-write.csv(combined_results$wald_adjacent_slopes, file.path(resultsFolder, "combined_wald_adjacent_slopes_results_20251006.csv"), row.names=TRUE)
+if (!file.exists(file.path(resultsFolder, "combined_wald_adjacent_slopes_results_20251104.csv"))) {
+write.csv(combined_results$wald_adjacent_slopes, file.path(resultsFolder, "combined_wald_adjacent_slopes_results_20251104.csv"), row.names=TRUE)
 }
 
-
+# If file not already created make sure it is not overwritten
+if (!file.exists(file.path(resultsFolder, "cd4_combined_each_slope_results_20251118.csv"))) {
+write.csv(cd4_combined_results$segment_results, file.path(resultsFolder, "cd4_combined_each_slope_results_20251118.csv"), row.names=TRUE)
+}
+if (!file.exists(file.path(resultsFolder, "cd4_combined_aapc_each_results_202511181.csv"))) {
+write.csv(cd4_combined_results$overall_summary, file.path(resultsFolder, "cd4_combined_aapc_each_results_202511181.csv"), row.names=TRUE)
+}
+if (!file.exists(file.path(resultsFolder, "cd4_combined_bic_results_20251118.csv"))) {
+write.csv(cd4_combined_results$bic_candidates, file.path(resultsFolder, "cd4_combined_bic_results_20251118.csv"), row.names=TRUE)
+}
+if (!file.exists(file.path(resultsFolder, "cd4_combined_change_points_results_20251118.csv"))) {
+write.csv(cd4_combined_results$change_points, file.path(resultsFolder, "cd4_combined_change_points_results_20251118.csv"), row.names=TRUE)
+}
+if (!file.exists(file.path(resultsFolder, "cd4_combined_wald_adjacent_slopes_results_20251118.csv"))) {
+write.csv(cd4_combined_results$wald_adjacent_slopes, file.path(resultsFolder, "cd4_combined_wald_adjacent_slopes_results_20251118.csv"), row.names=TRUE)
+}
 
 
 
@@ -3334,6 +3557,132 @@ library(scales)
 library(extrafont)
 # font_import(prompt = FALSE)  # Uncomment if needed
 # source('themes.R')  
+
+#### Rate of HIV diagnoses per 100,000 population by year ####
+# Step 1: Read national population data
+au_pop_yearly <- read_csv(file.path(dataFolder, "AU_pop_size_2001_2024.csv"),
+  col_types = cols(
+    Country = col_character(),
+    pop_size_2001 = col_double(),
+    pop_size_2002 = col_double(),
+    pop_size_2003 = col_double(),
+    pop_size_2004 = col_double(),
+    pop_size_2005 = col_double(),
+    pop_size_2006 = col_double(),
+    pop_size_2007 = col_double(),
+    pop_size_2008 = col_double(),
+    pop_size_2009 = col_double(),
+    pop_size_2010 = col_double(),
+    pop_size_2011 = col_double(),
+    pop_size_2012 = col_double(),
+    pop_size_2013 = col_double(),
+    pop_size_2014 = col_double(),
+    pop_size_2015 = col_double(),
+    pop_size_2016 = col_double(),
+    pop_size_2017 = col_double(),
+    pop_size_2018 = col_double(),
+    pop_size_2019 = col_double(),
+    pop_size_2020 = col_double(),
+    pop_size_2021 = col_double(),
+    pop_size_2022 = col_double(),
+    pop_size_2023 = col_double(),
+    pop_size_2024 = col_double()
+  )
+) %>%
+  pivot_longer(
+    cols = starts_with("pop_size_"),
+    names_to = "year",
+    values_to = "total_pop",
+    names_prefix = "pop_size_"
+  ) %>%
+  mutate(year = as.numeric(year)) %>%
+  filter(year >= 2001, year <= 2024)
+
+# Step 2: Summarise HIV notifications nationally
+hiv_data_pdo <- hiv_data %>%
+  filter(
+    year_diag >= 2001,
+    year_diag <= 2024,
+    !is.na(year_diag),
+    previ_diag_overseas == 1# advanced_hiv_diag_flag cd4_50_hiv_diag_flag late_hiv_diag_flag previ_diag_overseas
+  )
+
+hiv_data_fed <- hiv_data %>%
+  filter(
+    year_diag >= 2001,
+    year_diag <= 2024,
+    !is.na(year_diag),
+    previ_diag_overseas == 0 # advanced_hiv_diag_flag cd4_50_hiv_diag_flag late_hiv_diag_flag previ_diag_overseas
+  )
+
+hiv_data_late <- hiv_data %>%
+  filter(
+    year_diag >= 2001,
+    year_diag <= 2024,
+    !is.na(year_diag),
+    previ_diag_overseas == 0,
+    late_hiv_diag_flag == 1# advanced_hiv_diag_flag cd4_50_hiv_diag_flag late_hiv_diag_flag previ_diag_overseas
+  )
+
+hiv_cases_au_pdo <- hiv_data_pdo %>%
+  group_by(year_diag) %>%
+  summarise(
+    hiv_cases = n(),
+    .groups = "drop"
+  ) %>%
+  rename(year = year_diag)
+
+hiv_cases_au_fed <- hiv_data_fed %>%
+  group_by(year_diag) %>%
+  summarise(
+    hiv_cases = n(),
+    .groups = "drop"
+  ) %>%
+  rename(year = year_diag)
+
+hiv_cases_au_late <- hiv_data_late %>%
+  group_by(year_diag) %>%
+  summarise(
+    hiv_cases = n(),
+    .groups = "drop"
+  ) %>%
+  rename(year = year_diag)
+
+# Step 3: Join and calculate national notification rate
+hiv_au_rate_pdo <- au_pop_yearly %>%
+  left_join(hiv_cases_au_pdo, by = "year") %>%
+  mutate(
+    hiv_cases = ifelse(is.na(hiv_cases), 0, hiv_cases),
+    notif_rate_per_100k = (hiv_cases / total_pop) * 100000
+  )
+
+hiv_au_rate_fed <- au_pop_yearly %>%
+  left_join(hiv_cases_au_fed, by = "year") %>%
+  mutate(
+    hiv_cases = ifelse(is.na(hiv_cases), 0, hiv_cases),
+    notif_rate_per_100k = (hiv_cases / total_pop) * 100000
+  )
+
+hiv_au_rate_late <- au_pop_yearly %>%
+  left_join(hiv_cases_au_late, by = "year") %>%
+  mutate(
+    hiv_cases = ifelse(is.na(hiv_cases), 0, hiv_cases),
+    notif_rate_per_100k = (hiv_cases / total_pop) * 100000
+  )
+
+# View the results
+print(hiv_au_rate_pdo)
+
+# View the results
+print(hiv_au_rate_fed)
+
+if (!file.exists(file.path(resultsFolder, "hiv_au_rate_pdo_2001_2024_20251104.csv"))) {
+write.csv(hiv_au_rate_pdo, file.path(resultsFolder, "hiv_au_rate_pdo_2001_2024_20251104.csv"), row.names=FALSE)
+}
+
+if (!file.exists(file.path(resultsFolder, "hiv_au_rate_fed_2001_2024_20251104.csv"))) {
+write.csv(hiv_au_rate_fed, file.path(resultsFolder, "hiv_au_rate_fed_2001_2024_20251104.csv"), row.names=FALSE)
+}
 
 #### Rate of HIV diagnoses per 100,000 population by PHN and year ####
 # Read in the lookup tables
@@ -3467,190 +3816,6 @@ label_df <- phn_map |>
 # Named vector: names = PHN_NAME, values = colored HTML labels
 y_labels <- stats::setNames(label_df$label_html, label_df$PHN_NAME)
 
-#### previously diagnosed overseas ####
-# Filter HIV data for adults and years 2001-2024
-hiv_data_filtered <- hiv_data %>%
-  filter(
-    year_diag >= 2001,
-    year_diag <= 2024,
-    !is.na(phn_res),
-    !is.na(year_diag),
-    previ_diag_overseas == 1 # advanced_hiv_diag_flag cd4_50_hiv_diag_flag late_hiv_diag_flag previ_diag_overseas
-  )
-# Further filter to include only australian borns if needed
-#hiv_data_filtered <- hiv_data_filtered %>%
-#  filter(
-#    au_birth == "Australia"
-#  )
-
-# Step 1: Transform population data from wide to long format
-pop_sa2_long <- pop_sa2_yearly %>%
-  pivot_longer(
-    cols = starts_with("pop_size_"),
-    names_to = "year",
-    values_to = "pop_size",
-    names_prefix = "pop_size_"
-  ) %>%
-  mutate(year = as.numeric(year)) %>%
-  filter(year >= 2001, year <= 2024)
-
-# Step 2: Calculate PHN population for each year
-phn_pop_yearly <- pop_sa2_long %>%
-  inner_join(phn_lookup, by = "SA2_CODE21",relationship = "many-to-many") %>%
-  mutate(
-    pop_alloc = pop_size * RATIO_FROM_TO
-  ) %>%
-  filter(!is.na(PHN_CODE)) %>%
-  group_by(PHN_CODE, PHN_NAME, year) %>%
-  summarise(
-    total_pop = sum(pop_alloc, na.rm = TRUE),
-    .groups = "drop"
-  )
-
-yearly_totals <- phn_pop_yearly %>%
-  group_by(year) %>%
-  summarise(
-    total_australia_pop = sum(total_pop, na.rm = TRUE),
-    num_phns = n_distinct(PHN_CODE),
-    .groups = "drop"
-  ) %>%
-  arrange(year)
-
-
-# Step 3: Calculate HIV cases by PHN and year
-hiv_cases_yearly <- hiv_data_filtered %>%
-  group_by(phn_res, phn_name, year_diag) %>%
-  summarise(
-    hiv_cases = n(),
-    .groups = "drop"
-  ) %>%
-  rename(
-    PHN_CODE = phn_res,
-    PHN_NAME = phn_name,
-    year = year_diag
-  )
-
-# Step 4: Join HIV cases with population data and calculate rates
-hiv_case_rates <- phn_pop_yearly %>%
-  left_join(hiv_cases_yearly, by = c("PHN_CODE", "PHN_NAME", "year")) %>%
-  mutate(
-    hiv_cases = ifelse(is.na(hiv_cases), 0, hiv_cases),
-    case_rate_per_100k = (hiv_cases / total_pop) * 100000
-  ) %>%
-  # Filter out any PHNs with zero population (data quality check)
-  filter(total_pop > 0)
-
-hiv_heatmap_df <- hiv_case_rates %>%
-  dplyr::select(PHN_NAME, year, case_rate = case_rate_per_100k)
-
-# Create log-transformed case rate
-hiv_heatmap_df$case_rate_log <- log10(hiv_heatmap_df$case_rate + 1)
-
-hiv_heatmap_df <- hiv_heatmap_df |>
-  dplyr::left_join(
-    phn_map |>
-      dplyr::select(PHN_NAME, PHN_CODE, STATE, code_num),
-    by = "PHN_NAME"
-  )
-# Define breaks and colors for HIV case rates per 100k
-# Adjust these based on actual data range
-#scale_breaks <- c(0, 1, 2, 4, 6, 10, 15, 20)
-#scale_colors <- c("#FFFFCC", "#C7E9B4", "#7FCDBB", "#41B6C4", "#1D91C0", "#225EA8", "#0C2C84", "#081D58")
-
-scale_colors <- c("#FFFFCC", "#C7E9B4", "#7FCDBB", "#41B6C4", "#1D91C0", "#225EA8", "#0C2C84", "#081D58")
-scale_breaks <- c(0, 1, 2, 3,4,5)
-
-
-# Transformed breaks for legend positions
-log_breaks <- log10(scale_breaks + 1)
-
-
-#### Gradient version normal scale####
-p_timeseries_phn_2001_24_20250901_gradient <- ggplot(
-  hiv_heatmap_df,
-  aes(x = year, y = factor(PHN_NAME, levels = rev(ordered_names)), fill = case_rate)
-) +
-  geom_tile(color = "white", size = 0.2) +
-  scale_fill_gradientn(
-    colors = scale_colors,
-    breaks = scale_breaks,
-    labels = scale_breaks,
-    name = "Notifications\nper 100,000"
-  ) +
-  # Use our HTML labels
-  scale_y_discrete(
-    limits = rev(ordered_names),
-    labels = y_labels[rev(ordered_names)]
-  ) +
-  scale_x_continuous(breaks = seq(2001, 2024, by = 5)) +
-  theme_minimal() +
-  theme(
-    panel.grid = element_blank(),
-    axis.text.x = element_text(angle = 45, hjust = 1, size = 10),
-    # IMPORTANT: markdown to render colored labels
-    axis.text.y = ggtext::element_markdown(size = 8),
-    plot.title = element_text(size = 16, face = "bold"),
-    plot.subtitle = element_text(size = 12),
-    legend.position = "right",
-    legend.title = element_text(size = 10),
-    axis.title = element_text(size = 12)
-  ) +
-  labs(
-    title = "",
-    subtitle = "B. Notification rates, Previously diagnosed overseas, 2001-2024",
-    x = "Year",
-    y = "Primary Health Network"
-  ) +
-  # Vertical lines for milestones
-  geom_vline(xintercept = 2020, lwd = 1.2, color = "#cf0a66") +
-  geom_vline(xintercept = 2016, lwd = 1.2, color = "#cf0a66")
-
-print(p_timeseries_phn_2001_24_20250901_gradient)
-
-# Ensure state order is fixed
-state_order <- c("NSW", "VIC", "QLD", "SA", "WA", "TAS", "NT", "ACT")
-
-state_legend_df <- tibble::tibble(
-  STATE = factor(state_order, levels = state_order)
-)
-
-# Add invisible points to trigger legend
-p_timeseries_phn_2001_24_20250901_gradient <-
-  p_timeseries_phn_2001_24_20250901_gradient +
-  geom_point(
-    data = state_legend_df,
-    aes(x = 2001, y = ordered_names[1], color = STATE),
-    inherit.aes = FALSE,
-    alpha = 0, size = 3
-  ) +
-  # Manual color scale in correct order
-  scale_color_manual(
-    values = state_cols[state_order],
-    name   = "State"
-  ) +
-  # Stack legends vertically: colorbar first, then states
-  guides(
-    fill = guide_colorbar(order = 1),
-    color = guide_legend(
-      order = 2,
-      override.aes = list(alpha = 1, size = 4),
-      direction = "vertical",     # vertical order top→bottom
-      title.position = "top"
-    )
-  ) +
-  theme(
-    legend.box = "vertical",
-    legend.box.just = "left",
-    legend.spacing.y = unit(4, "pt"),
-    legend.direction = "vertical",
-    legend.position = "right",
-    legend.justification = "top"
-  )
-
-print(p_timeseries_phn_2001_24_20250901_gradient)
-pdo <- p_timeseries_phn_2001_24_20250901_gradient
-
-
 
 #### first ever diagnosed in Australia ####
 # Filter HIV data for adults and years 2001-2024
@@ -3725,13 +3890,52 @@ hiv_case_rates <- phn_pop_yearly %>%
   # Filter out any PHNs with zero population (data quality check)
   filter(total_pop > 0)
 
-hiv_heatmap_df <- hiv_case_rates %>%
+hiv_case_rates_fed <- hiv_case_rates
+
+phn_over3_summary_fed <- hiv_case_rates_fed %>%
+  group_by(year) %>%
+  summarise(
+    num_phn_over3 = sum(case_rate_per_100k > 3, na.rm = TRUE),
+    total_phn = n_distinct(PHN_CODE),
+    pct_over3 = 100 * num_phn_over3 / total_phn
+  ) %>%
+  arrange(year)
+
+phn_rate_diff_fed <- hiv_case_rates_fed %>%
+  filter(year %in% c(2001, 2024)) %>%           # keep only 2001 and 2024
+  dplyr::select(PHN_CODE, PHN_NAME, year, case_rate_per_100k) %>%
+  pivot_wider(
+    names_from = year,
+    values_from = case_rate_per_100k,
+    names_prefix = "rate_"
+  ) %>%
+  mutate(
+    rate_diff_2024_minus_2001 = rate_2024 - rate_2001
+  )
+
+# View the results
+print(phn_rate_diff_fed)
+
+# Compute yearly inequality (variation) in PHN-level rates
+phn_inequality_fed <- hiv_case_rates_fed %>%
+  group_by(year) %>%
+  summarise(
+    mean_rate = mean(case_rate_per_100k, na.rm = TRUE),
+    sd_rate   = sd(case_rate_per_100k, na.rm = TRUE),
+    gini_rate = ineq::Gini(case_rate_per_100k)
+  ) %>%
+  ungroup()
+print(phn_inequality_fed)
+
+
+#### Heatmap figures for first ever diagnosis####
+hiv_heatmap_df_fed <- hiv_case_rates %>%
   dplyr::select(PHN_NAME, year, case_rate = case_rate_per_100k)
 
 # Create log-transformed case rate
-hiv_heatmap_df$case_rate_log <- log10(hiv_heatmap_df$case_rate + 1)
+hiv_heatmap_df_fed$case_rate_log <- log10(hiv_heatmap_df_fed$case_rate + 1)
 
-hiv_heatmap_df <- hiv_heatmap_df |>
+hiv_heatmap_df_fed <- hiv_heatmap_df_fed |>
   dplyr::left_join(
     phn_map |>
       dplyr::select(PHN_NAME, PHN_CODE, STATE, code_num),
@@ -3741,25 +3945,33 @@ hiv_heatmap_df <- hiv_heatmap_df |>
 # Adjust these based on actual data range
 #scale_breaks <- c(0, 1, 2, 4, 6, 10, 15, 20)
 #scale_colors <- c("#FFFFCC", "#C7E9B4", "#7FCDBB", "#41B6C4", "#1D91C0", "#225EA8", "#0C2C84", "#081D58")
+common_breaks <- c(0, 5, 10, 15, 20, max(hiv_heatmap_df_fed$case_rate))
+common_colors <- c("#FFFFCC", "#C7E9B4", "#7FCDBB", "#41B6C4",
+                   "#1D91C0", "#225EA8", "#0C2C84", "#081D58")
+common_labels <- c(0, 5, 10, 15, 20, "")
 
 scale_colors <- c("#FFFFCC", "#C7E9B4", "#7FCDBB", "#41B6C4", "#1D91C0", "#225EA8", "#0C2C84", "#081D58")
+scale_breaks <- c(0, 1, 2, 3,4,5)
+
 scale_breaks <- c(0, 5, 10, 15,20,25)
 
 # Transformed breaks for legend positions
 log_breaks <- log10(scale_breaks + 1)
 
-#### Gradient version normal scale####
+#Gradient version normal scale
 p_timeseries_phn_2001_24_20250901_gradient <- ggplot(
-  hiv_heatmap_df,
+  hiv_heatmap_df_fed,
   aes(x = year, y = factor(PHN_NAME, levels = rev(ordered_names)), fill = case_rate)
 ) +
   geom_tile(color = "white", size = 0.2) +
   scale_fill_gradientn(
-    colors = scale_colors,
-    breaks = scale_breaks,
-    labels = scale_breaks,
-    name = "Notifications\nper 100,000"
-  ) +
+  colors = common_colors,
+  breaks = common_breaks,
+  labels = common_labels,
+  limits = c(min(common_breaks), max(common_breaks)),
+  name = "Notifications\nper 100,000"
+)+
+
   # Use our HTML labels
   scale_y_discrete(
     limits = rev(ordered_names),
@@ -3834,13 +4046,261 @@ p_timeseries_phn_2001_24_20250901_gradient <-
 print(p_timeseries_phn_2001_24_20250901_gradient)
 fed <- p_timeseries_phn_2001_24_20250901_gradient 
 
+
+#### previously diagnosed overseas ####
+# Filter HIV data for adults and years 2001-2024
+hiv_data_filtered <- hiv_data %>%
+  filter(
+    year_diag >= 2001,
+    year_diag <= 2024,
+    !is.na(phn_res),
+    !is.na(year_diag),
+    previ_diag_overseas == 1 # advanced_hiv_diag_flag cd4_50_hiv_diag_flag late_hiv_diag_flag previ_diag_overseas
+  )
+# Further filter to include only australian borns if needed
+#hiv_data_filtered <- hiv_data_filtered %>%
+#  filter(
+#    au_birth == "Australia"
+#  )
+
+# Step 1: Transform population data from wide to long format
+pop_sa2_long <- pop_sa2_yearly %>%
+  pivot_longer(
+    cols = starts_with("pop_size_"),
+    names_to = "year",
+    values_to = "pop_size",
+    names_prefix = "pop_size_"
+  ) %>%
+  mutate(year = as.numeric(year)) %>%
+  filter(year >= 2001, year <= 2024)
+
+# Step 2: Calculate PHN population for each year
+phn_pop_yearly <- pop_sa2_long %>%
+  inner_join(phn_lookup, by = "SA2_CODE21",relationship = "many-to-many") %>%
+  mutate(
+    pop_alloc = pop_size * RATIO_FROM_TO
+  ) %>%
+  filter(!is.na(PHN_CODE)) %>%
+  group_by(PHN_CODE, PHN_NAME, year) %>%
+  summarise(
+    total_pop = sum(pop_alloc, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+yearly_totals <- phn_pop_yearly %>%
+  group_by(year) %>%
+  summarise(
+    total_australia_pop = sum(total_pop, na.rm = TRUE),
+    num_phns = n_distinct(PHN_CODE),
+    .groups = "drop"
+  ) %>%
+  arrange(year)
+
+
+# Step 3: Calculate HIV cases by PHN and year
+hiv_cases_yearly <- hiv_data_filtered %>%
+  group_by(phn_res, phn_name, year_diag) %>%
+  summarise(
+    hiv_cases = n(),
+    .groups = "drop"
+  ) %>%
+  rename(
+    PHN_CODE = phn_res,
+    PHN_NAME = phn_name,
+    year = year_diag
+  )
+
+# Step 4: Join HIV cases with population data and calculate rates
+hiv_case_rates <- phn_pop_yearly %>%
+  left_join(hiv_cases_yearly, by = c("PHN_CODE", "PHN_NAME", "year")) %>%
+  mutate(
+    hiv_cases = ifelse(is.na(hiv_cases), 0, hiv_cases),
+    case_rate_per_100k = (hiv_cases / total_pop) * 100000
+  ) %>%
+  # Filter out any PHNs with zero population (data quality check)
+  filter(total_pop > 0)
+
+hiv_case_rates_pdo <- hiv_case_rates
+
+phn_rate_diff_pdo <- hiv_case_rates_pdo %>%
+  filter(year %in% c(2001, 2024)) %>%           # keep only 2001 and 2024
+  dplyr::select(PHN_CODE, PHN_NAME, year, case_rate_per_100k) %>%
+  pivot_wider(
+    names_from = year,
+    values_from = case_rate_per_100k,
+    names_prefix = "rate_"
+  ) %>%
+  mutate(
+    rate_diff_2024_minus_2001 = rate_2024 - rate_2001
+  )
+
+phn_over1_summary_pdo <- hiv_case_rates_pdo %>%
+  group_by(year) %>%
+  summarise(
+    num_phn_over3 = sum(case_rate_per_100k > 1, na.rm = TRUE),
+    total_phn = n_distinct(PHN_CODE),
+    pct_over3 = 100 * num_phn_over3 / total_phn
+  ) %>%
+  arrange(year)
+
+# Compute yearly inequality (variation) in PHN-level rates
+phn_inequality_pdo <- hiv_case_rates_pdo %>%
+  group_by(year) %>%
+  summarise(
+    mean_rate = mean(case_rate_per_100k, na.rm = TRUE),
+    sd_rate   = sd(case_rate_per_100k, na.rm = TRUE),
+    gini_rate = ineq::Gini(case_rate_per_100k)
+  ) %>%
+  ungroup()
+
+# Inspect
+print(phn_inequality_pdo)
+
+# View the results
+print(phn_rate_diff_pdo)
+
+if (!file.exists(file.path(resultsFolder, "phn_hiv_case_rates_pdo_2001_2024_20251104.csv"))) {
+write.csv(hiv_case_rates_pdo, file.path(resultsFolder, "phn_hiv_case_rates_pdo_2001_2024_20251104.csv"), row.names=FALSE)
+}
+
+if (!file.exists(file.path(resultsFolder, "phn_hiv_case_rates_diff_pdo_2001_2024_20251104.csv"))) {
+write.csv(phn_rate_diff_pdo, file.path(resultsFolder, "phn_hiv_case_rates_diff_pdo_2001_2024_20251104.csv"), row.names=FALSE)
+}
+
+#### Heatmap figures for previously diagnosed overseas####
+hiv_heatmap_df_pdo <- hiv_case_rates %>%
+  dplyr::select(PHN_NAME, year, case_rate = case_rate_per_100k)
+
+# Create log-transformed case rate
+hiv_heatmap_df_pdo$case_rate_log <- log10(hiv_heatmap_df_pdo$case_rate + 1)
+
+hiv_heatmap_df_pdo <- hiv_heatmap_df_pdo |>
+  dplyr::left_join(
+    phn_map |>
+      dplyr::select(PHN_NAME, PHN_CODE, STATE, code_num),
+    by = "PHN_NAME"
+  )
+# Define breaks and colors for HIV case rates per 100k
+# Adjust these based on actual data range
+#scale_breaks <- c(0, 1, 2, 4, 6, 10, 15, 20)
+#scale_colors <- c("#FFFFCC", "#C7E9B4", "#7FCDBB", "#41B6C4", "#1D91C0", "#225EA8", "#0C2C84", "#081D58")
+# Define a shared legend for both figures
+
+scale_colors <- c("#FFFFCC", "#C7E9B4", "#7FCDBB", "#41B6C4", "#1D91C0", "#225EA8", "#0C2C84", "#081D58")
+scale_breaks <- c(0, 1, 2, 3,4,5)
+
+
+# Transformed breaks for legend positions
+log_breaks <- log10(scale_breaks + 1)
+
+
+# Gradient version normal scale
+p_timeseries_phn_2001_24_20250901_gradient <- ggplot(
+  hiv_heatmap_df_pdo,
+  aes(x = year, y = factor(PHN_NAME, levels = rev(ordered_names)), fill = case_rate)
+) +
+  geom_tile(color = "white", size = 0.2) +
+  scale_fill_gradientn(
+  colors = common_colors,
+  breaks = common_breaks,
+  labels = common_labels,
+  limits = c(min(common_breaks), max(common_breaks)),
+  name = "Notifications\nper 100,000"
+)+
+
+  # Use our HTML labels
+  scale_y_discrete(
+    limits = rev(ordered_names),
+    labels = y_labels[rev(ordered_names)]
+  ) +
+  scale_x_continuous(breaks = seq(2001, 2024, by = 5)) +
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 10),
+    # IMPORTANT: markdown to render colored labels
+    axis.text.y = ggtext::element_markdown(size = 8),
+    plot.title = element_text(size = 16, face = "bold"),
+    plot.subtitle = element_text(size = 12),
+    legend.position = "right",
+    legend.title = element_text(size = 10),
+    axis.title = element_text(size = 12)
+  ) +
+  labs(
+    title = "",
+    subtitle = "B. Notification rates, Previously diagnosed overseas, 2001-2024",
+    x = "Year",
+    y = "Primary Health Network"
+  ) +
+  # Vertical lines for milestones
+  geom_vline(xintercept = 2020, lwd = 1.2, color = "#cf0a66") +
+  geom_vline(xintercept = 2016, lwd = 1.2, color = "#cf0a66")
+
+print(p_timeseries_phn_2001_24_20250901_gradient)
+
+# Ensure state order is fixed
+state_order <- c("NSW", "VIC", "QLD", "SA", "WA", "TAS", "NT", "ACT")
+
+state_legend_df <- tibble::tibble(
+  STATE = factor(state_order, levels = state_order)
+)
+
+# Add invisible points to trigger legend
+p_timeseries_phn_2001_24_20250901_gradient <-
+  p_timeseries_phn_2001_24_20250901_gradient +
+  geom_point(
+    data = state_legend_df,
+    aes(x = 2001, y = ordered_names[1], color = STATE),
+    inherit.aes = FALSE,
+    alpha = 0, size = 3
+  ) +
+  # Manual color scale in correct order
+  scale_color_manual(
+    values = state_cols[state_order],
+    name   = "State"
+  ) +
+  # Stack legends vertically: colorbar first, then states
+  guides(
+    fill = guide_colorbar(order = 1),
+    color = guide_legend(
+      order = 2,
+      override.aes = list(alpha = 1, size = 4),
+      direction = "vertical",     # vertical order top→bottom
+      title.position = "top"
+    )
+  ) +
+  theme(
+    legend.box = "vertical",
+    legend.box.just = "left",
+    legend.spacing.y = unit(4, "pt"),
+    legend.direction = "vertical",
+    legend.position = "right",
+    legend.justification = "top"
+  )
+
+print(p_timeseries_phn_2001_24_20250901_gradient)
+pdo <- p_timeseries_phn_2001_24_20250901_gradient
+hgdfghf
 library(patchwork)
-combined_plot_phn_hiv_rates_2001_24 <- ( fed + pdo ) + plot_layout(heights = c(1, 1))
+combined_plot_phn_hiv_rates_2001_24 <- 
+  fed / pdo +
+  plot_layout(guides = "collect", heights = c(1, 1)) &
+  theme(legend.position = "right")
+
+top_2_plots <- (fed / pdo) + 
+  plot_layout(guides = "collect") & 
+  theme(legend.position = "right")
+
+bottom_plot <- late_index_phn + 
+  theme(legend.position = "right")
+
+combined_plot_phn_2001_24 <- 
+  wrap_plots(top_2_plots, bottom_plot, ncol = 1, heights = c(2, 1))
 
 ####save figure for combined plot####
 SaveFigure <- function(folder, filename, figure, 
     format = ".png", width = 25, 
-    height = 25, units = "cm", dpi = 600,...) {
+    height = 37.5, units = "cm", dpi = 600,...) {
     ggsave(file.path(folder, paste(filename, format, sep = "")), 
       plot = figure, width = width, height = height, units = units,dpi=dpi, ...)
 }
@@ -3848,6 +4308,374 @@ SaveFigure <- function(folder, filename, figure,
 if (!file.exists(file.path(figFolder, "combined_plot_phn_hiv_rates_2001_24_20251010.png"))) {
     SaveFigure(figFolder,"combined_plot_phn_hiv_rates_2001_24_20251010", combined_plot_phn_hiv_rates_2001_24)
 }
+if (!file.exists(file.path(figFolder, "combined_plot_phn_2001_24_202511132.png"))) {
+    SaveFigure(figFolder,"combined_plot_phn_2001_24_20251113", combined_plot_phn_2001_24)
+}
+
+#### late diagnosed in Australia ####
+# Filter HIV data for adults and years 2001-2024
+hiv_data_filtered <- hiv_data %>%
+  filter(
+    year_diag >= 2001,
+    year_diag <= 2024,
+    !is.na(phn_res),
+    !is.na(year_diag),
+    late_hiv_diag_flag == 1,
+    previ_diag_overseas == 0# advanced_hiv_diag_flag cd4_50_hiv_diag_flag late_hiv_diag_flag previ_diag_overseas
+  )
+# Further filter to include only australian borns if needed
+#hiv_data_filtered <- hiv_data_filtered %>%
+#  filter(
+#    au_birth == "Australia"
+#  )
+
+# Step 1: Transform population data from wide to long format
+pop_sa2_long <- pop_sa2_yearly %>%
+  pivot_longer(
+    cols = starts_with("pop_size_"),
+    names_to = "year",
+    values_to = "pop_size",
+    names_prefix = "pop_size_"
+  ) %>%
+  mutate(year = as.numeric(year)) %>%
+  filter(year >= 2001, year <= 2024)
+
+# Step 2: Calculate PHN population for each year
+phn_pop_yearly <- pop_sa2_long %>%
+  inner_join(phn_lookup, by = "SA2_CODE21",relationship = "many-to-many") %>%
+  mutate(
+    pop_alloc = pop_size * RATIO_FROM_TO
+  ) %>%
+  filter(!is.na(PHN_CODE)) %>%
+  group_by(PHN_CODE, PHN_NAME, year) %>%
+  summarise(
+    total_pop = sum(pop_alloc, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+yearly_totals <- phn_pop_yearly %>%
+  group_by(year) %>%
+  summarise(
+    total_australia_pop = sum(total_pop, na.rm = TRUE),
+    num_phns = n_distinct(PHN_CODE),
+    .groups = "drop"
+  ) %>%
+  arrange(year)
+
+
+# Step 3: Calculate HIV cases by PHN and year
+hiv_cases_yearly <- hiv_data_filtered %>%
+  group_by(phn_res, phn_name, year_diag) %>%
+  summarise(
+    hiv_cases = n(),
+    .groups = "drop"
+  ) %>%
+  rename(
+    PHN_CODE = phn_res,
+    PHN_NAME = phn_name,
+    year = year_diag
+  )
+
+# Step 4: Join HIV cases with population data and calculate rates
+hiv_case_rates <- phn_pop_yearly %>%
+  left_join(hiv_cases_yearly, by = c("PHN_CODE", "PHN_NAME", "year")) %>%
+  mutate(
+    hiv_cases = ifelse(is.na(hiv_cases), 0, hiv_cases),
+    case_rate_per_100k = (hiv_cases / total_pop) * 100000
+  ) %>%
+  # Filter out any PHNs with zero population (data quality check)
+  filter(total_pop > 0)
+
+hiv_case_rates_late <- hiv_case_rates
+
+phn_over3_summary_late <- hiv_case_rates_late %>%
+  group_by(year) %>%
+  summarise(
+    num_phn_over3 = sum(case_rate_per_100k > 3, na.rm = TRUE),
+    total_phn = n_distinct(PHN_CODE),
+    pct_over3 = 100 * num_phn_over3 / total_phn
+  ) %>%
+  arrange(year)
+
+phn_rate_diff_late <- hiv_case_rates_late %>%
+  filter(year %in% c(2001, 2024)) %>%           # keep only 2001 and 2024
+  select(PHN_CODE, PHN_NAME, year, case_rate_per_100k) %>%
+  pivot_wider(
+    names_from = year,
+    values_from = case_rate_per_100k,
+    names_prefix = "rate_"
+  ) %>%
+  mutate(
+    rate_diff_2024_minus_2001 = rate_2024 - rate_2001
+  )
+
+# View the results
+print(phn_rate_diff_late)
+
+# Compute yearly inequality (variation) in PHN-level rates
+phn_inequality_late <- hiv_case_rates_late %>%
+  group_by(year) %>%
+  summarise(
+    mean_rate = mean(case_rate_per_100k, na.rm = TRUE),
+    sd_rate   = sd(case_rate_per_100k, na.rm = TRUE),
+    gini_rate = ineq::Gini(case_rate_per_100k)
+  ) %>%
+  ungroup()
+print(phn_inequality_late)
+
+
+#### Gini coefficient plot ####
+library(dplyr)
+library(ggplot2)
+library(scales)
+
+
+# Weighted Gini computation
+weighted_gini <- function(x, w) {
+  # Remove NAs
+  ok <- !is.na(x) & !is.na(w)
+  x <- x[ok]
+  w <- w[ok]
+  
+  # Order by x ascending (low to high)
+  ord <- order(x)
+  x <- x[ord]
+  w <- w[ord]
+  
+  # Cumulative weighted proportions - include (0,0) point
+  cw <- c(0, cumsum(w) / sum(w))
+  px <- c(0, cumsum(w * x) / sum(w * x))
+  
+  # Numerical integration (trapezoid rule)
+  # Area under Lorenz curve
+  area <- sum((px[-1] + px[-length(px)]) / 2 * diff(cw))
+  
+  # Gini coefficient
+  G <- 1 - 2 * area
+  
+  return(G)
+}
+
+phn_gini_trend <- hiv_case_rates_late %>%
+  group_by(year) %>%
+  summarise(
+    gini_weighted = weighted_gini(case_rate_per_100k, total_pop),
+    mean_rate     = mean(case_rate_per_100k, na.rm = TRUE),
+    sd_rate       = sd(case_rate_per_100k, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+gini_time_plot <- ggplot(phn_gini_trend, aes(x = year, y = gini_weighted)) +
+  geom_line(color = "#1f77b4", linewidth = 1) +
+  geom_point(color = "#1f77b4", size = 2) +
+  scale_x_continuous(breaks = seq(2001, 2024, 3)) +
+  scale_y_continuous(limits = c(0, 1),
+                       expand = c(0, 0)) +   # y-axis starts at 0
+  labs(
+    title = "Gini Index of HIV Notification Rates Across PHNs (2001–2024)",
+    y = "Gini Index",
+    x = "Year"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid.major = element_blank(),     # remove major gridlines
+    panel.grid.minor = element_blank(),     # remove minor gridlines
+    axis.line = element_line(color = "black"),  # add black x & y axes
+    axis.ticks = element_line(color = "black"), # add tick marks
+    axis.text = element_text(color = "black"),
+    plot.title = element_text(face = "bold", size = 12)
+  )
+
+
+plot_phn_lorenz <- function(hiv_case_rates_fed, phn_map, year_selected = 2001,
+                            label_left = c("Perth North", "South Western Sydney", "Adelaide"),
+                            label_right = c("Central and Eastern Sydney"),label_lefttop = c(),sub_title = "") {
+
+  # Prepare data
+  data_year <- hiv_case_rates_fed %>%
+    filter(year == year_selected, total_pop > 0) %>%
+    left_join(phn_map %>% select(PHN_CODE, STATE), by = "PHN_CODE") %>%
+    arrange(case_rate_per_100k) %>%
+    mutate(
+      cum_pop = cumsum(total_pop),
+      cum_cases = cumsum(hiv_cases),
+      prop_pop = cum_pop / sum(total_pop, na.rm = TRUE),
+      prop_cases = cum_cases / sum(hiv_cases, na.rm = TRUE)
+    )
+
+  # Compute Gini
+  gini_val <- weighted_gini(data_year$case_rate_per_100k, data_year$total_pop)
+
+  # Prepare labels
+  lefttop_labels <- data_year %>% filter(PHN_NAME %in% label_lefttop) %>%
+    mutate(
+      x_text = prop_pop - 0.03,
+      y_text = prop_cases + 0.03
+    )
+  left_labels <- data_year %>% filter(PHN_NAME %in% label_left) %>%
+    mutate(
+      x_text = prop_pop - 0.03,
+      y_text = prop_cases 
+    )  
+  right_labels <- data_year %>% filter(PHN_NAME %in% label_right) %>%
+    mutate(
+      x_text = prop_pop + 0.03,
+      y_text = prop_cases - 0.03
+    )
+
+  #
+  p <- ggplot() +
+    geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "grey70") +
+
+    # Colored step segments by state
+    geom_segment(data = data_year,
+                 aes(x = lag(prop_pop, default = 0),
+                     y = lag(prop_cases, default = 0),
+                     xend = prop_pop,
+                     yend = lag(prop_cases, default = 0),
+                     color = STATE), linewidth = 0.5) +
+    geom_segment(data = data_year,
+                 aes(x = prop_pop,
+                     y = lag(prop_cases, default = 0),
+                     xend = prop_pop,
+                     yend = prop_cases,
+                     color = STATE), linewidth = 0.5) +
+
+    scale_color_manual(values = state_cols) +
+    scale_x_continuous(limits = c(0, 1.05),
+                       breaks = seq(0, 1, 0.25),
+                       labels = function(x) sprintf("%.2f", x),
+                       expand = c(0, 0)) +
+    scale_y_continuous(limits = c(0, 1.05),
+                       breaks = seq(0, 1, 0.25),
+                       labels = function(x) sprintf("%.2f", x),
+                       expand = c(0, 0)) +
+    labs(
+      title = paste0(""),
+      subtitle = paste0(sub_title,"Notifications (",year_selected,"); Gini index: ", round(gini_val, 3)),
+      x = "Cumulative proportion of population",
+      y = "Cumulative proportion of notifications",
+      color = "State/Territory"
+    ) +
+
+    theme_minimal(base_size = 10) +
+    theme(
+      legend.position = "bottom",
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      axis.line = element_line(color = "black"),
+      axis.ticks = element_line(color = "black"),
+      axis.text = element_text(color = "black"),
+      plot.margin = margin(t = 10, r = 50, b = 10, l = 10),
+      plot.title = element_text(face = "bold", hjust = 0, size = 12),
+      plot.subtitle = element_text(size = 10),
+      legend.text = element_text(size = 10),
+      legend.title = element_text(size = 10)
+    ) +
+    coord_fixed(ratio = 1, clip = "off")
+
+  # Add label connectors and text
+if (nrow(left_labels)) {
+  p <- p +
+    geom_segment(
+      data = left_labels,
+      aes(x = x_text, y = y_text, xend = prop_pop, yend = prop_cases),
+      color = "black"
+    ) +
+    geom_label(
+      data = left_labels,
+      aes(x = x_text, y = y_text, label = PHN_NAME),
+      hjust = 1, vjust = 0.5, size = 3,
+      fill = "white",        # White background behind label text
+      label.size = 0         # No border line
+    )
+}
+
+if (nrow(lefttop_labels)) {
+  p <- p +
+    geom_segment(
+      data = lefttop_labels,
+      aes(x = x_text, y = y_text, xend = prop_pop, yend = prop_cases),
+      color = "black"
+    ) +
+    geom_label(
+      data = lefttop_labels,
+      aes(x = x_text, y = y_text, label = PHN_NAME),
+      hjust = 1, vjust = 0, size = 3,
+      fill = "white",        # White background behind label text
+      label.size = 0         # No border line
+    )
+}  
+  
+if (nrow(right_labels)) {
+  p <- p +
+    geom_segment(
+      data = right_labels,
+      aes(x = x_text, y = y_text, xend = prop_pop, yend = prop_cases),
+      color = "black"
+    ) +
+    geom_label(
+      data = right_labels,
+      aes(x = x_text, y = y_text, label = PHN_NAME),
+      hjust = 0, vjust = 1, size = 3,
+      fill = "white",        # White background behind text
+      label.size = 0         # Removes border box outline
+    )
+}
+
+  return(list(plot = p, gini = gini_val, data = data_year))
+}
+
+#Run the lorenz plot 
+lorenz_2001 <- plot_phn_lorenz(hiv_case_rates_late, phn_map, year_selected = 2001,
+                               label_left = c("Central and Eastern Sydney"),
+                               label_lefttop = c("North Western Melbourne", "South Eastern Melbourne"),
+                               label_right = c(),
+                               sub_title = "A. ")
+lorenz_2001$plot
+lorenz_2024 <- plot_phn_lorenz(hiv_case_rates_late, phn_map, year_selected = 2024,
+                               label_left = c("Central and Eastern Sydney"),
+                               label_lefttop = c("North Western Melbourne", "Brisbane North"),
+                               label_right = c(),
+                               sub_title = "B. ")
+lorenz_2024$plot
+  
+library(patchwork)
+
+# Combine plots side-by-side with one legend
+combined_lorenz <- lorenz_2001$plot +
+                   lorenz_2024$plot +
+                   plot_layout(guides = "collect") & theme(legend.position = "bottom")
+
+# Show combined plot
+combined_lorenz
+
+#### Save figures ####
+SaveFigure <- function(folder, filename, figure, 
+    format = ".png", width = 20, 
+    height = 12.5, units = "cm", dpi = 600,...) {
+    ggsave(file.path(folder, paste(filename, format, sep = "")), 
+      plot = figure, width = width, height = height, units = units,dpi=dpi, ...)
+}
+
+# If figure not already created make sure it is not overwritten
+if (!file.exists(file.path(figFolder, "combined_lorenz_plot_2001_2024_20251105.png"))) {
+  SaveFigure(figFolder,"combined_lorenz_plot_2001_2024_20251105", combined_lorenz)
+}
+
+if (!file.exists(file.path(figFolder, "gini_time_plot_2001_2024_20251105.png"))) {
+  SaveFigure(figFolder,"gini_time_plot_2001_2024_20251105", gini_time_plot)
+}
+
+if (!file.exists(file.path(resultsFolder, "phn_hiv_case_rates_fed_2001_2024_20251104.csv"))) {
+write.csv(hiv_case_rates_fed, file.path(resultsFolder, "phn_hiv_case_rates_fed_2001_2024_20251104.csv"), row.names=FALSE)
+}
+
+if (!file.exists(file.path(resultsFolder, "phn_hiv_case_rates_diff_fed_2001_2024_20251104.csv"))) {
+write.csv(phn_rate_diff_fed, file.path(resultsFolder, "phn_hiv_case_rates_diff_fed_2001_2024_20251104.csv"), row.names=FALSE)
+}
+
+
 
 #### Average CD4 count (First ever diagnosed in Australia) ####
 # Filter
@@ -3988,7 +4816,293 @@ if (!file.exists(file.path(figFolder, "p_cd4_mean_fed_2001_24_202510101.png"))) 
     SaveFigure(figFolder,"p_cd4_mean_fed_2001_24_20251010", p_cd4_mean_fed)
 }
 
-tre
+
+#### Composite Index for Late Diagnosis ####
+library(dplyr)
+library(tidyr)
+
+# Step 1: define all PHNs and all years
+all_phns  <- unique(na.omit(hiv_data$phn_name))
+all_years <- 2001:2024
+
+# Step 2: full grid of PHN × year
+phn_year_full <- expand.grid(
+  phn_name = all_phns,
+  year_diag = all_years,
+  KEEP.OUT.ATTRS = FALSE,
+  stringsAsFactors = FALSE
+)
+
+# Step 3: summarise actual data
+phn_year_summary <- hiv_data %>%
+  filter(!is.na(phn_name),
+         !is.na(late_hiv_diag_flag),
+         year_diag >= 2001, year_diag <= 2024,
+         previ_diag_overseas == 0) %>%
+  group_by(year_diag, phn_name) %>%
+  summarise(
+    total_cases = n(),
+    late_diagnoses = sum(late_hiv_diag_flag, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Step 4: join with full grid and replace NAs with 0
+phn_year_summary <- phn_year_full %>%
+  left_join(phn_year_summary, by = c("year_diag", "phn_name")) %>%
+  mutate(
+    total_cases = ifelse(is.na(total_cases), 0, total_cases),
+    late_diagnoses = ifelse(is.na(late_diagnoses), 0, late_diagnoses)
+  )
+
+# Step 5: compute per-year totals and normalization denominator
+yearly_totals <- phn_year_summary %>%
+  group_by(year_diag) %>%
+  summarise(total_late_year = sum(late_diagnoses, na.rm = TRUE), .groups = "drop")
+
+max_total_all <- max(yearly_totals$total_late_year, na.rm = TRUE)
+
+# Step 6: compute ranges and weights
+range_prop <- max(ifelse(phn_year_summary$total_cases > 0, 
+                         phn_year_summary$late_diagnoses / phn_year_summary$total_cases, 0)) -
+              min(ifelse(phn_year_summary$total_cases > 0, 
+                         phn_year_summary$late_diagnoses / phn_year_summary$total_cases, 0))
+
+range_norm <- max(phn_year_summary$late_diagnoses / max_total_all, na.rm = TRUE) -
+              min(phn_year_summary$late_diagnoses / max_total_all, na.rm = TRUE)
+
+w1 <- range_norm / (range_prop + range_norm)
+w2 <- range_prop / (range_prop + range_norm)
+
+# Step 7: compute composite index, setting 0 for total_cases = 0
+phn_year_index <- phn_year_summary %>%
+  mutate(
+    late_prop = ifelse(total_cases == 0, 0, late_diagnoses / total_cases),
+    normalized_count = late_diagnoses / max_total_all,
+    composite_index = ifelse(total_cases == 0, 0,
+                             (w1 * late_prop) + (w2 * normalized_count))
+  )
+
+# Optional: inspect results
+top_phn_each_year <- phn_year_index %>%
+  group_by(year_diag) %>%
+  slice_max(order_by = composite_index, n = 1) %>%
+  select(year_diag, phn_name, composite_index)
+
+yearly_composite_summary <- phn_year_index %>%
+  group_by(year_diag) %>%
+  summarise(
+    mean_index = mean(composite_index, na.rm = TRUE),
+    median_index = median(composite_index, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# View results
+yearly_composite_summary
+median(yearly_composite_summary$mean_index)
+
+library(dplyr)
+library(purrr)
+library(segmented)
+
+library(ggplot2)
+# overall trend of composite index
+ggplot(yearly_composite_summary, aes(x = year_diag)) +
+  geom_line(aes(y = mean_index), color = "#1f78b4", linewidth = 1.2) +
+  geom_point(aes(y = mean_index), color = "#1f78b4", size = 2) +
+  geom_smooth(aes(y = mean_index), method = "lm", se = TRUE, color = "black", linetype = "dashed") +
+  theme_minimal(base_size = 13) +
+  labs(
+    title = "Trend in National Late Diagnosis Composite Index (2001–2024)",
+    x = "Year",
+    y = "Mean Composite Index"
+  )
+
+model_trend <- lm(mean_index ~ year_diag, data = yearly_composite_summary)
+summary(model_trend)
+summary(lm(median_index ~ year_diag, data = yearly_composite_summary))
+
+# phn level trend analysis
+library(dplyr)
+library(broom)
+
+# Fit linear model per PHN: composite_index ~ year_diag
+phn_overall_trend <- phn_year_index %>%
+  filter(year_diag %in% c(2001:2024))  %>%
+  group_by(phn_name) %>%
+  do(tidy(lm(composite_index ~ year_diag, data = .))) %>%
+  ungroup()
+
+# Keep only slope term (year_diag)
+phn_overall_trend <- phn_overall_trend %>%
+  dplyr::filter(term == "year_diag") %>%
+  dplyr::select(phn_name, estimate, std.error, statistic, p.value) %>%
+  rename(
+    slope = estimate,
+    se = std.error,
+    t_value = statistic,
+    p_value = p.value
+  )
+
+phn_overall_trend <- phn_overall_trend %>%
+  mutate(
+    trend_category = case_when(
+      p_value < 0.05 & slope > 0 ~ "Increasing",
+      p_value < 0.05 & slope < 0 ~ "Decreasing",
+      TRUE ~ "Stable"
+    )
+  )
+
+# Summary table
+phn_overall_trend %>%
+  count(trend_category)
+
+phn_year_index <- phn_year_index %>%
+  left_join(
+    phn_overall_trend %>% dplyr::select(phn_name, trend_category),
+    by = "phn_name"
+  )
+
+ggplot(phn_year_index, aes(x = year_diag, y = composite_index, group = phn_name, color = trend_category)) +
+  geom_line(alpha = 0.5) +
+  theme_minimal(base_size = 12) +
+  labs(
+    title = "Overall PHN Trends in Late HIV Diagnosis Composite Index (2001–2024)",
+    x = "Year", y = "Composite Index"
+  )
+
+#### Ranking PHNs by Composite Index ####
+library(dplyr)
+library(ggplot2)
+
+# Step 1: Calculate yearly rankings
+phn_yearly_ranks <- phn_year_index %>%
+  group_by(year_diag) %>%
+  mutate(
+    rank = rank(-composite_index, ties.method = "min"),
+    percentile = percent_rank(-composite_index)
+  ) %>%
+  ungroup()
+
+# Step 2: Identify persistently high-ranked PHNs
+persistent_high_rank <- phn_yearly_ranks %>%
+  group_by(phn_name) %>%
+  summarise(
+    mean_rank = mean(rank, na.rm = TRUE),
+    median_rank = median(rank, na.rm = TRUE),
+    mean_index = mean(composite_index, na.rm = TRUE),
+    years_in_top5 = sum(rank <= 5, na.rm = TRUE),
+    years_in_top10 = sum(rank <= 10, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(mean_rank)
+
+print("PHNs with best average rankings:")
+print(head(persistent_high_rank, 10))
+
+#### Heatmap figure for composite index ####
+hiv_heatmap_df_late <- phn_year_index %>%
+  dplyr::select(PHN_NAME = phn_name, year = year_diag, composite_index = composite_index)
+
+hiv_heatmap_df_late <- hiv_heatmap_df_late |>
+  dplyr::left_join(
+    phn_map |>
+      dplyr::select(PHN_NAME, PHN_CODE, STATE, code_num),
+    by = "PHN_NAME"
+  )
+
+scale_colors <- c("#52B0B0","#93CFC3","#E6D5C1","#e99999","#d56666","#8B2635")
+
+scale_colors <- c("#5D688A","#FFF2EF","#FFDBB6","#F7A5A5")
+
+scale_breaks <- c(0, 0.05, 0.10,0.15, 0.20,0.25)
+scale_labels <- c("0", "0.05", "0.10", "0.15", "0.20", "0.25")
+
+#### Gradient version normal scale####
+p_timeseries_phn_2001_24_20250901_gradient <- ggplot(
+  hiv_heatmap_df_late,
+  aes(x = year, y = factor(PHN_NAME, levels = rev(ordered_names)), fill = composite_index)
+) +
+  geom_tile(color = "white", size = 0.2) +
+  scale_fill_gradientn(
+    colors = scale_colors,
+    breaks = scale_breaks,
+    labels = scale_labels,
+    #limits = c(0, 0.20),
+    #oob = scales::squish,
+    name = "Late diagnosis\nindex"
+  ) +
+  # Use our HTML labels
+  scale_y_discrete(
+    limits = rev(ordered_names),
+    labels = y_labels[rev(ordered_names)]
+  ) +
+  scale_x_continuous(breaks = seq(2001, 2024, by = 5)) +
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 10),
+    # IMPORTANT: markdown to render colored labels
+    axis.text.y = ggtext::element_markdown(size = 8),
+    plot.title = element_text(size = 16, face = "bold"),
+    plot.subtitle = element_text(size = 12),
+    legend.position = "right",
+    legend.title = element_text(size = 10),
+    axis.title = element_text(size = 12)
+  ) +
+  labs(
+    title = "",
+    subtitle = "C. Late diagnosis index, First ever diagnosed in Australia, 2001-2024",
+    x = "Year",
+    y = "Primary Health Network"
+  ) 
+  # Vertical lines for milestones
+#  geom_vline(xintercept = 2020, lwd = 1.2, color = "#cf0a66") +
+#  geom_vline(xintercept = 2016, lwd = 1.2, color = "#cf0a66")
+
+# Display the plot
+print(p_timeseries_phn_2001_24_20250901_gradient)
+late_index_phn<-p_timeseries_phn_2001_24_20250901_gradient
+
+
+# Ensure state order is fixed
+state_order <- c("NSW", "VIC", "QLD", "SA", "WA", "TAS", "NT", "ACT")
+
+state_legend_df <- tibble::tibble(
+  STATE = factor(state_order, levels = state_order)
+)
+
+# Add invisible points to trigger legend
+p_timeseries_phn_2001_24_20250901_gradient <-
+  p_timeseries_phn_2001_24_20250901_gradient +
+  geom_point(
+    data = state_legend_df,
+    aes(x = 2001, y = ordered_names[1], color = STATE),
+    inherit.aes = FALSE,
+    alpha = 0, size = 3
+  ) +
+  # Manual color scale in correct order
+  scale_color_manual(
+    values = state_cols[state_order],
+    name   = "State"
+  ) +
+  # Stack legends vertically: colorbar first, then states
+  guides(
+    fill = guide_colorbar(order = 1),
+    color = guide_legend(
+      order = 2,
+      override.aes = list(alpha = 1, size = 4),
+      direction = "vertical",     # vertical order top→bottom
+      title.position = "top"
+    )
+  ) +
+  theme(
+    legend.box = "vertical",
+    legend.box.just = "left",
+    legend.spacing.y = unit(4, "pt"),
+    legend.direction = "vertical",
+    legend.position = "right",
+    legend.justification = "top"
+  )
 
 
 
@@ -4194,6 +5308,7 @@ if (!file.exists(file.path(figFolder, "p_timeseries_phn_2001_24_20250902_viridis
 if (!file.exists(file.path(figFolder, "p_timeseries_phn_2001_24_20250902_gradient.png"))) {
     SaveFigure(figFolder,"p_timeseries_phn_2001_24_20250902_gradient", p_timeseries_phn_2001_24_20250901_gradient)
 }
+
 
 
 ```
