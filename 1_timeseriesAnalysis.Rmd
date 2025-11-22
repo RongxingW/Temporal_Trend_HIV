@@ -136,23 +136,6 @@ if (!file.exists(file.path(resultsFolder, "rainbow_plot_prop_20251104.csv"))) {
 write.csv(rainbow_all$summary_data_complete, file.path(resultsFolder, "rainbow_plot_prop_20251104.csv"), row.names=FALSE)
 }
 
-# Filter data for specific population 
-rainbow_msm <- create_cd4_rainbow_plot(
-  data = hiv_data,
-  start_year = 2020,
-  end_year = 2023,
-  exposure_filter  = "MSM",     # hiv_exposure_risk
-  gender_filter = NULL,       # gender
-  region_birth_filter = NULL,   # region_birth
-  lang_home_filter = NULL,      # lang_home
-  place_acq_filter = NULL,      # place_acq
-  state_res_filter = NULL,      # state_res
-  phn_res_filter = NULL,        # phn_res
-  title = "CD4 Count at HIV Diagnosis Among MSM",
-  subtitle = "",
-  dash_line = TRUE
-)
-print(rainbow_msm)
 
 ####save figure####
 SaveFigure <- function(folder, filename, figure, 
@@ -184,14 +167,22 @@ absolute_rainbow_all <- create_cd4_absolute_rainbow_plot(
 )
 print(absolute_rainbow_all)
 
+rainbow_all_percentage_plot <- rainbow_all$p + theme(legend.position = "none")
+rainbow_all_number_plot <- absolute_rainbow_all
+# Combine side by side (or adjust ncol/nrow as needed)
+library(patchwork)
+combined_number_percentage_plot <- 
+  (rainbow_all_percentage_plot + rainbow_all_number_plot) +
+  plot_layout(heights = c(1, 1))
 
-# Filter data for specific population 
-absolute_rainbow_msm <- create_cd4_rainbow_plot(
+#### MSM rainbow plot ####
+# proportion rainbow plot for MSM 
+rainbow_msm <- create_cd4_rainbow_plot(
   data = hiv_data,
-  start_year = 2020,
-  end_year = 2023,
-  exposure_filter  = "MSM",     # hiv_exposure_risk
-  gender_filter = NULL,       # gender
+  start_year = 2001,
+  end_year = 2024,
+  exposure_filter  = c("MSM", "MSMIDU"),     # hiv_exposure_risk
+  sex_filter = NULL,       # gender
   region_birth_filter = NULL,   # region_birth
   lang_home_filter = NULL,      # lang_home
   place_acq_filter = NULL,      # place_acq
@@ -199,16 +190,192 @@ absolute_rainbow_msm <- create_cd4_rainbow_plot(
   phn_res_filter = NULL,        # phn_res
   title = "CD4 Count at HIV Diagnosis Among MSM",
   subtitle = "",
+  previ_diag_overseas = FALSE,
+  show_n = FALSE,  # Do not show sample size on x-axis
   dash_line = FALSE
 )
+print(rainbow_msm)
+
+# Absolute number rainbow plot for MSM
+absolute_rainbow_msm <- create_cd4_absolute_rainbow_plot(
+  data = hiv_data,
+  start_year = 2001,
+  end_year = 2024,
+  exposure_filter  = c("MSM", "MSMIDU"),     # hiv_exposure_risk
+  title = "CD4 Count at HIV Diagnosis Among MSM",
+  subtitle = "",
+  previ_diag_overseas = FALSE,
+  show_n = FALSE,  # Do not show sample size on x-axis
+  dash_line = FALSE
+)
+
 print(absolute_rainbow_msm)
 
-rainbow_all_percentage_plot <- rainbow_all$p + theme(legend.position = "none")
-rainbow_all_number_plot <- absolute_rainbow_all
+rainbow_msm_percentage_plot <- rainbow_msm$p + theme(legend.position = "none")
+rainbow_msm_number_plot <- absolute_rainbow_msm
 # Combine side by side (or adjust ncol/nrow as needed)
 library(patchwork)
-combined_number_percentage_plot <- 
-  (rainbow_all_percentage_plot + rainbow_all_number_plot) +
+msm_combined_number_percentage_plot <- 
+  (rainbow_msm_percentage_plot + rainbow_msm_number_plot) +
+  plot_layout(heights = c(1, 1))
+
+#### Hetero rainbow plot ####
+# proportion rainbow plot
+rainbow_Hetero <- create_cd4_rainbow_plot(
+  data = hiv_data,
+  start_year = 2001,
+  end_year = 2024,
+  exposure_filter  = c("Hetero"),     # hiv_exposure_risk
+  title = "CD4 Count at HIV Diagnosis Among Hetero",
+  subtitle = "",
+  previ_diag_overseas = FALSE,
+  show_n = FALSE,  # Do not show sample size on x-axis
+  dash_line = FALSE
+)
+print(rainbow_Hetero)
+
+# Absolute number rainbow plot
+absolute_rainbow_Hetero <- create_cd4_absolute_rainbow_plot(
+  data = hiv_data,
+  start_year = 2001,
+  end_year = 2024,
+  exposure_filter  = c("Hetero"),     # hiv_exposure_risk
+  title = "CD4 Count at HIV Diagnosis Among Hetero",
+  subtitle = "",
+  previ_diag_overseas = FALSE,
+  show_n = FALSE,  # Do not show sample size on x-axis
+  dash_line = FALSE
+)
+
+print(absolute_rainbow_Hetero)
+
+rainbow_Hetero_percentage_plot <- rainbow_Hetero$p + theme(legend.position = "none")
+rainbow_Hetero_number_plot <- absolute_rainbow_Hetero
+# Combine side by side (or adjust ncol/nrow as needed)
+library(patchwork)
+Hetero_combined_number_percentage_plot <- 
+  (rainbow_Hetero_percentage_plot + rainbow_Hetero_number_plot) +
+  plot_layout(heights = c(1, 1))
+
+#### Overseas born rainbow plot ####
+# proportion rainbow plot
+rainbow_Overseas <- create_cd4_rainbow_plot(
+  data = hiv_data,
+  start_year = 2001,
+  end_year = 2024,
+  exposure_filter  = NULL,     # hiv_exposure_risk
+  au_birth_filter = c("Overseas"),
+  title = "",
+  subtitle = "A. Overseas-born, Proportion of HIV notifications",
+  previ_diag_overseas = FALSE,
+  show_n = FALSE,  # Do not show sample size on x-axis
+  dash_line = FALSE
+)
+print(rainbow_Overseas)
+
+# Absolute number rainbow plot
+absolute_rainbow_Overseas <- create_cd4_absolute_rainbow_plot(
+  data = hiv_data,
+  start_year = 2001,
+  end_year = 2024,
+  exposure_filter  = NULL,     # hiv_exposure_risk
+  au_birth_filter = c("Overseas"),
+  title = "",
+  subtitle = "B. Overseas-born, Number of HIV notifications",
+  previ_diag_overseas = FALSE,
+  show_n = FALSE,  # Do not show sample size on x-axis
+  dash_line = FALSE
+)
+
+print(absolute_rainbow_Overseas)
+
+rainbow_Overseas_percentage_plot <- rainbow_Overseas$p + theme(legend.position = "none")
+rainbow_Overseas_number_plot <- absolute_rainbow_Overseas
+# Combine side by side (or adjust ncol/nrow as needed)
+library(patchwork)
+Overseas_combined_number_percentage_plot <- 
+  (rainbow_Overseas_percentage_plot + rainbow_Overseas_number_plot) +
+  plot_layout(heights = c(1, 1))
+
+
+#### Australia born rainbow plot ####
+# proportion rainbow plot
+rainbow_Australia <- create_cd4_rainbow_plot(
+  data = hiv_data,
+  start_year = 2001,
+  end_year = 2024,
+  exposure_filter  = NULL,     # hiv_exposure_risk
+  au_birth_filter = c("Australia"),
+  title = "",
+  subtitle = "A. Australian-born, Proportion of HIV notifications",
+  previ_diag_overseas = FALSE,
+  show_n = FALSE,  # Do not show sample size on x-axis
+  dash_line = FALSE
+)
+print(rainbow_Australia)
+
+# Absolute number rainbow plot
+absolute_rainbow_Australia <- create_cd4_absolute_rainbow_plot(
+  data = hiv_data,
+  start_year = 2001,
+  end_year = 2024,
+  exposure_filter  = NULL,     # hiv_exposure_risk
+  au_birth_filter = c("Australia"),
+  title = "",
+  subtitle = "B. Australian-born, Number of HIV notifications",
+  previ_diag_overseas = FALSE,
+  show_n = FALSE,  # Do not show sample size on x-axis
+  dash_line = FALSE
+)
+
+print(absolute_rainbow_Australia)
+
+rainbow_Australia_percentage_plot <- rainbow_Australia$p + theme(legend.position = "none")
+rainbow_Australia_number_plot <- absolute_rainbow_Australia
+# Combine side by side (or adjust ncol/nrow as needed)
+library(patchwork)
+Australia_combined_number_percentage_plot <- 
+  (rainbow_Australia_percentage_plot + rainbow_Australia_number_plot) +
+  plot_layout(heights = c(1, 1))
+
+#### age_18_29 born rainbow plot ####
+# proportion rainbow plot
+rainbow_age_18_29 <- create_cd4_rainbow_plot(
+  data = hiv_data,
+  start_year = 2001,
+  end_year = 2024,
+  exposure_filter  = NULL,     # hiv_exposure_risk
+  age_filter = c(50:150),
+  title = "CD4 Count at HIV Diagnosis Among age 18-29",
+  subtitle = "",
+  previ_diag_overseas = FALSE,
+  show_n = FALSE,  # Do not show sample size on x-axis
+  dash_line = FALSE
+)
+print(rainbow_age_18_29)
+
+# Absolute number rainbow plot
+absolute_rainbow_age_18_29 <- create_cd4_absolute_rainbow_plot(
+  data = hiv_data,
+  start_year = 2001,
+  end_year = 2024,
+  exposure_filter  = NULL,     # hiv_exposure_risk
+  age_filter = c(50:150),
+  title = "CD4 Count at HIV Diagnosis Among age 18-29",
+  subtitle = "",
+  previ_diag_overseas = FALSE,
+  show_n = FALSE,  # Do not show sample size on x-axis
+  dash_line = FALSE
+)
+
+print(absolute_rainbow_age_18_29)
+
+rainbow_age_18_29_percentage_plot <- rainbow_age_18_29$p + theme(legend.position = "none")
+rainbow_age_18_29_number_plot <- absolute_rainbow_age_18_29
+# Combine side by side (or adjust ncol/nrow as needed)
+library(patchwork)
+age_18_29_combined_number_percentage_plot <- 
+  (rainbow_age_18_29_percentage_plot + rainbow_age_18_29_number_plot) +
   plot_layout(heights = c(1, 1))
 
 ####save figure####
@@ -229,10 +396,25 @@ if (!file.exists(file.path(figFolder, "absolute_rainbow_all_noPDO_2025026.png"))
     SaveFigure(figFolder,"absolute_rainbow_all_noPDO_20250926", absolute_rainbow_all)
 }
 
-if (!file.exists(file.path(figFolder, "absolute_rainbow_msm_20250312.png"))) {
-    SaveFigure(figFolder,"absolute_rainbow_msm_20250312", absolute_rainbow_msm)
+if (!file.exists(file.path(figFolder, "msm_combined_number_percentage_plot_20251122.png"))) {
+    SaveFigure(figFolder,"msm_combined_number_percentage_plot_20251122", msm_combined_number_percentage_plot)
 }
 
+if (!file.exists(file.path(figFolder, "Hetero_combined_number_percentage_plot_20251122.png"))) {
+    SaveFigure(figFolder,"Hetero_combined_number_percentage_plot_20251122", Hetero_combined_number_percentage_plot)
+}
+
+if (!file.exists(file.path(figFolder, "Overseas_combined_number_percentage_plot_20251122.png"))) {
+    SaveFigure(figFolder,"Overseas_combined_number_percentage_plot_20251122", Overseas_combined_number_percentage_plot)
+}
+
+if (!file.exists(file.path(figFolder, "Australia_combined_number_percentage_plot_20251122.png"))) {
+    SaveFigure(figFolder,"Australia_combined_number_percentage_plot_20251122", Australia_combined_number_percentage_plot)
+}
+
+if (!file.exists(file.path(figFolder, "age_18_29_combined_number_percentage_plot_20251122.png"))) {
+    SaveFigure(figFolder,"age_18_29_combined_number_percentage_plot_20251122", age_18_29_combined_number_percentage_plot)
+}
 
 #### cd4 trend ####
 # Restrict to fed + non-missing CD4
@@ -548,6 +730,7 @@ if (!file.exists(file.path(figFolder, "all_data_lineplot_20250326.png"))) {
 library(segmented)
 library(MASS)
 
+
 #### # Example usage of the functions above ####
 #### All notifications ####
 segmented_results <- analyze_segmented_trend_complete(
@@ -693,6 +876,7 @@ if (!file.exists(file.path(figFolder, "CD4_ALL_segment_plot_2001_2024_202510101.
 }
 
 
+
 #### Australian born ####
 AB_segmented_results <- analyze_segmented_trend_complete(
   data = hiv_data,
@@ -787,6 +971,63 @@ OB_MSM_segmented_results$bic_candidates
 OB_MSM_segmented_results$change_points
 OB_MSM_segmented_results$wald_adjacent_slopes
 
+#### Age 18-29 ####
+age_18_29_segmented_results <- analyze_segmented_trend_complete(
+  data = hiv_data,
+  start_year = 2001,
+  end_year = 2024,
+  count_period = "monthly",
+  include_overseas = FALSE,
+  age_filter = c(18:29),
+  main_title = "",
+  sub_title = "C. Age 18-29 years",
+  family_type = "NB",
+  num_changes = 5,
+  show_overall = FALSE,  # Don't show overall trend
+  show_segment = TRUE   # Don't show segmented trends
+)
+
+age_18_29_segmented_results$segment_results
+age_18_29_segmented_results$segment_plot
+
+#### Age 30-49 ####
+age_30_49_segmented_results <- analyze_segmented_trend_complete(
+  data = hiv_data,
+  start_year = 2001,
+  end_year = 2024,
+  count_period = "monthly",
+  include_overseas = FALSE,
+  age_filter = c(30:49),
+  main_title = "",
+  sub_title = "D. Age 30-49 years",
+  family_type = "NB",
+  num_changes = 5,
+  show_overall = FALSE,  # Don't show overall trend
+  show_segment = TRUE   # Don't show segmented trends
+)
+
+age_30_49_segmented_results$segment_results
+age_30_49_segmented_results$segment_plot
+
+#### Age 50+ ####
+age_50_plus_segmented_results <- analyze_segmented_trend_complete(
+  data = hiv_data,
+  start_year = 2001,
+  end_year = 2024,
+  count_period = "monthly",
+  include_overseas = FALSE,
+  age_filter = c(50:200),
+  main_title = "",
+  sub_title = "E. Age 50 years and over",
+  family_type = "NB",
+  num_changes = 5,
+  show_overall = FALSE,  # Don't show overall trend
+  show_segment = TRUE   # Don't show segmented trends
+)
+
+age_50_plus_segmented_results$segment_results
+age_50_plus_segmented_results$segment_plot
+
 #### MSM ####
 MSM_segmented_results <- analyze_segmented_trend_complete(
   data = hiv_data,
@@ -833,6 +1074,53 @@ Hetero_segmented_results$bic_candidates
 Hetero_segmented_results$change_points
 Hetero_segmented_results$wald_adjacent_slopes
 
+#### Australian born Hetero####
+AB_Hetero_segmented_results <- analyze_segmented_trend_complete(
+  data = hiv_data,
+  start_year = 2001,
+  end_year = 2024,
+  count_period = "monthly",
+  include_overseas = FALSE,
+  au_birth_filter = "Australia",
+  exposure_filter = c("Hetero"),
+  main_title = "",
+  sub_title = "G. Australian-born people reporting herterosexual sex as a risk exposure",
+  family_type = "NB",
+  num_changes = 5,
+  show_overall = FALSE,  # Don't show overall trend
+  show_segment = TRUE   # Don't show segmented trends
+)
+
+AB_Hetero_segmented_results$segment_results
+AB_Hetero_segmented_results$segment_plot
+AB_Hetero_segmented_results$overall_results
+AB_Hetero_segmented_results$bic_candidates
+AB_Hetero_segmented_results$change_points
+AB_Hetero_segmented_results$wald_adjacent_slopes
+
+#### Overseas born Hetero####
+OB_Hetero_segmented_results <- analyze_segmented_trend_complete(
+  data = hiv_data,
+  start_year = 2001,
+  end_year = 2024,
+  count_period = "monthly",
+  include_overseas = FALSE,
+  au_birth_filter = "Overseas",
+  exposure_filter = c("Hetero"),
+  main_title = "",
+  sub_title = "H. Overseas-born people reporting herterosexual sex as a risk exposure",
+  family_type = "NB",
+  num_changes = 5,
+  show_overall = FALSE,  # Don't show overall trend
+  show_segment = TRUE   # Don't show segmented trends
+)
+
+OB_Hetero_segmented_results$segment_results
+OB_Hetero_segmented_results$segment_plot
+OB_Hetero_segmented_results$overall_results
+OB_Hetero_segmented_results$bic_candidates
+OB_Hetero_segmented_results$change_points
+OB_Hetero_segmented_results$wald_adjacent_slopes
 
 #### Hetero Male ####
 Hetero_Male_segmented_results <- analyze_segmented_trend_complete(
@@ -843,7 +1131,7 @@ Hetero_Male_segmented_results <- analyze_segmented_trend_complete(
   include_overseas = FALSE,
   exposure_filter = c("Hetero"),
   main_title = "",
-  sub_title = "G. Men reporting herterosexual sex as a risk exposure",
+  sub_title = "I. Men reporting herterosexual sex as a risk exposure",
   gender_filter = "Male",
   family_type = "NB",
   num_changes = 5,
@@ -866,8 +1154,9 @@ Female_segmented_results <- analyze_segmented_trend_complete(
   count_period = "monthly",
   include_overseas = FALSE,
   gender_filter = "Female",
+  exposure_filter = c("Hetero"),
   main_title = "",
-  sub_title = "H. Women",
+  sub_title = "J. Women reporting herterosexual sex as a risk exposure",
   family_type = "NB",
   num_changes = 5,
   show_overall = FALSE,  # Don't show overall trend
@@ -932,32 +1221,48 @@ adv_plot_nolegend <- advanced_diag_segmented_results$segment_plot +
   theme(legend.position = "none")
 
 #### Combined plot (first time diagnosed in Australia vs previously diagnosed overseas) ####
-Sub_group_segment_plot <- (
+library(patchwork)
+Main_sub_group_segment_plot <- (
   wrap_plots(
     AB_segmented_results$segment_plot,
     OB_segmented_results$segment_plot,
     MSM_segmented_results$segment_plot,
     Hetero_segmented_results$segment_plot,
-    AB_MSM_segmented_results$segment_plot,
-    OB_MSM_segmented_results$segment_plot,
-    Hetero_Male_segmented_results$segment_plot,
-    Female_segmented_results$segment_plot,
-    late_diag_segmented_results$segment_plot,
-    nrow = 5
+    age_18_29_segmented_results$segment_plot,
+    age_30_49_segmented_results$segment_plot,
+    age_50_plus_segmented_results$segment_plot,
+    nrow = 4
   ) + plot_layout(guides = "collect")
 ) & theme(legend.position = "bottom")
+
+Supp_sub_group_segment_plot <- (
+  wrap_plots(
+    AB_MSM_segmented_results$segment_plot,
+    OB_MSM_segmented_results$segment_plot,
+    AB_Hetero_segmented_results$segment_plot,
+    OB_Hetero_segmented_results$segment_plot,
+    Hetero_Male_segmented_results$segment_plot,
+    Female_segmented_results$segment_plot,
+    nrow = 3
+  ) + plot_layout(guides = "collect")
+) & theme(legend.position = "bottom")
+
 
 #### Save figures ####
 SaveFigure <- function(folder, filename, figure, 
     format = ".png", width = 45, 
-    height = 37.5, units = "cm", dpi = 600,...) {
+    height = 22.5, units = "cm", dpi = 600,...) {
     ggsave(file.path(folder, paste(filename, format, sep = "")), 
       plot = figure, width = width, height = height, units = units,dpi=dpi, ...)
-}
+}  # n row =2, height = 15, n row = 5, height = 37.5
 
 # If figure not already created make sure it is not overwritten
-if (!file.exists(file.path(figFolder, "Sub_group_segment_plot_2001_2024_202511181.png"))) {
-  SaveFigure(figFolder,"Sub_group_segment_plot_2001_2024_20251118", Sub_group_segment_plot)
+if (!file.exists(file.path(figFolder, "Main_sub_group_segment_plot_2001_2024_20251118.png"))) {
+  SaveFigure(figFolder,"Main_sub_group_segment_plot_2001_2024_20251118", Main_sub_group_segment_plot)
+}
+
+if (!file.exists(file.path(figFolder, "Supp_sub_group_segment_plot_2001_2024_20251118.png"))) {
+  SaveFigure(figFolder,"Supp_sub_group_segment_plot_2001_2024_20251118.png", Supp_sub_group_segment_plot)
 }
 
 if (!file.exists(file.path(figFolder, "overall_trend_plot_20250702.png"))) {
@@ -1168,6 +1473,314 @@ if (!file.exists(file.path(figFolder, "cd4_group_segment_plot_2001_2024_20251118
 }
 
 
+#### CD4 STRATIFIED ANALYSIS for Overseas born####
+# <200
+Overseas_g200_segmented_results <- analyze_segmented_trend_complete(
+  data = hiv_data,
+  start_year = 2001,
+  end_year = 2024,
+  advanced_diag_filter = TRUE,
+  au_birth_filter = "Overseas",
+  count_period = "monthly",
+  include_overseas = FALSE,
+  family_type  = "NB",
+  num_changes = 5,
+  main_title = "",
+  sub_title = "A. Overseas-born, CD4 count <200",
+  show_overall = FALSE,  # Don't show overall trend
+  show_segment = TRUE
+)
+
+
+Overseas_g200_segmented_results$segment_results
+Overseas_g200_segmented_results$segment_plot
+
+# 200-<350
+Overseas_g200_350_segmented_results <- analyze_segmented_trend_complete(
+  data = hiv_data,
+  start_year = 2001,
+  end_year = 2024,
+  cd4_count_filter = c(200:349),
+  late_diag_filter = TRUE,
+  au_birth_filter = "Overseas",
+  count_period = "monthly",
+  include_overseas = FALSE,
+  family_type  = "NB",
+  num_changes = 5,
+  main_title = "",
+  sub_title = "B. Overseas-born, CD4 count 200-349",
+  show_overall = FALSE,  # Don't show overall trend
+  show_segment = TRUE
+)
+
+
+Overseas_g200_350_segmented_results$segment_results
+Overseas_g200_350_segmented_results$segment_plot
+
+
+# 350-<500
+Overseas_g350_500_segmented_results <- analyze_segmented_trend_complete(
+  data = hiv_data,
+  start_year = 2001,
+  end_year = 2024,
+  cd4_count_filter = c(350:499),
+  count_period = "monthly",
+  au_birth_filter = "Overseas",
+  include_overseas = FALSE,
+  family_type  = "NB",
+  num_changes = 5,
+  main_title = "",
+  sub_title = "C. Overseas-born, CD4 count 350-499",
+  show_overall = FALSE,  # Don't show overall trend
+  show_segment = TRUE
+)
+
+
+Overseas_g350_500_segmented_results$segment_results
+Overseas_g350_500_segmented_results$segment_plot
+
+# 500+
+Overseas_g500_segmented_results <- analyze_segmented_trend_complete(
+  data = hiv_data,
+  start_year = 2001,
+  end_year = 2024,
+  cd4_count_filter = c(50:200000),
+  count_period = "monthly",
+  au_birth_filter = "Overseas",
+  include_overseas = FALSE,
+  family_type  = "NB",
+  num_changes = 5,
+  main_title = "",
+  sub_title = "D. Overseas-born, CD4 count 500+",
+  show_overall = FALSE,  # Don't show overall trend
+  show_segment = TRUE
+)
+
+
+Overseas_g500_segmented_results$segment_results
+Overseas_g500_segmented_results$segment_plot
+
+# seroconversion <350
+Overseas_gsero_segmented_results <- analyze_segmented_trend_complete(
+  data = hiv_data,
+  start_year = 2001,
+  end_year = 2024,
+  cd4_count_filter = c(0:349),
+  late_diag_filter = FALSE,
+  count_period = "monthly",
+  au_birth_filter = "Overseas",
+  include_overseas = FALSE,
+  family_type  = "NB",
+  num_changes = 5,
+  main_title = "",
+  sub_title = "E. Overseas-born, Seroconversion with CD4 count <350",
+  show_overall = FALSE,  # Don't show overall trend
+  show_segment = TRUE
+)
+
+
+Overseas_gsero_segmented_results$segment_results
+Overseas_gsero_segmented_results$segment_plot
+
+#unknown CD4
+Overseas_gunknown_segmented_results <- analyze_segmented_trend_complete(
+  data = hiv_data,
+  start_year = 2001,
+  end_year = 2024,
+  cd4_count_filter = NA,
+  count_period = "monthly",
+  include_overseas = FALSE,
+  au_birth_filter = "Overseas",
+  family_type  = "NB",
+  num_changes = 5,
+  main_title = "",
+  sub_title = "F. Overseas-born, Unknown CD4 count",
+  show_overall = FALSE,  # Don't show overall trend
+  show_segment = TRUE
+)
+
+Overseas_gunknown_segmented_results$segment_results
+Overseas_gunknown_segmented_results$segment_plot
+
+
+#### Combined plot cd4 group ####
+library(patchwork)
+Overseas_cd4_group_segment_plot <- (
+  wrap_plots(
+    Overseas_g200_segmented_results$segment_plot,
+    Overseas_g200_350_segmented_results$segment_plot,
+    Overseas_g350_500_segmented_results$segment_plot,
+    Overseas_g500_segmented_results$segment_plot,
+    Overseas_gsero_segmented_results$segment_plot,
+    Overseas_gunknown_segmented_results$segment_plot,
+    nrow = 3
+  ) + plot_layout(guides = "collect")
+) & theme(legend.position = "bottom")
+
+#### CD4 STRATIFIED ANALYSIS for Australian-born####
+# <200
+Australia_g200_segmented_results <- analyze_segmented_trend_complete(
+  data = hiv_data,
+  start_year = 2001,
+  end_year = 2024,
+  advanced_diag_filter = TRUE,
+  au_birth_filter = "Australia",
+  count_period = "monthly",
+  include_overseas = FALSE,
+  family_type  = "NB",
+  num_changes = 5,
+  main_title = "",
+  sub_title = "A. Australian-born, CD4 count <200",
+  show_overall = FALSE,  # Don't show overall trend
+  show_segment = TRUE
+)
+
+
+Australia_g200_segmented_results$segment_results
+Australia_g200_segmented_results$segment_plot
+
+# 200-<350
+Australia_g200_350_segmented_results <- analyze_segmented_trend_complete(
+  data = hiv_data,
+  start_year = 2001,
+  end_year = 2024,
+  cd4_count_filter = c(200:349),
+  late_diag_filter = TRUE,
+  au_birth_filter = "Australia",
+  count_period = "monthly",
+  include_overseas = FALSE,
+  family_type  = "NB",
+  num_changes = 5,
+  main_title = "",
+  sub_title = "B. Australian-born, CD4 count 200-349",
+  show_overall = FALSE,  # Don't show overall trend
+  show_segment = TRUE
+)
+
+
+Australia_g200_350_segmented_results$segment_results
+Australia_g200_350_segmented_results$segment_plot
+
+
+# 350-<500
+Australia_g350_500_segmented_results <- analyze_segmented_trend_complete(
+  data = hiv_data,
+  start_year = 2001,
+  end_year = 2024,
+  cd4_count_filter = c(350:499),
+  count_period = "monthly",
+  au_birth_filter = "Australia",
+  include_overseas = FALSE,
+  family_type  = "NB",
+  num_changes = 5,
+  main_title = "",
+  sub_title = "C. Australian-born, CD4 count 350-499",
+  show_overall = FALSE,  # Don't show overall trend
+  show_segment = TRUE
+)
+
+
+Australia_g350_500_segmented_results$segment_results
+Australia_g350_500_segmented_results$segment_plot
+
+# 500+
+Australia_g500_segmented_results <- analyze_segmented_trend_complete(
+  data = hiv_data,
+  start_year = 2001,
+  end_year = 2024,
+  cd4_count_filter = c(50:200000),
+  count_period = "monthly",
+  au_birth_filter = "Australia",
+  include_overseas = FALSE,
+  family_type  = "NB",
+  num_changes = 5,
+  main_title = "",
+  sub_title = "D. Australian-born, CD4 count 500+",
+  show_overall = FALSE,  # Don't show overall trend
+  show_segment = TRUE
+)
+
+
+Australia_g500_segmented_results$segment_results
+Australia_g500_segmented_results$segment_plot
+
+# seroconversion <350
+Australia_gsero_segmented_results <- analyze_segmented_trend_complete(
+  data = hiv_data,
+  start_year = 2001,
+  end_year = 2024,
+  cd4_count_filter = c(0:349),
+  late_diag_filter = FALSE,
+  count_period = "monthly",
+  au_birth_filter = "Australia",
+  include_overseas = FALSE,
+  family_type  = "NB",
+  num_changes = 5,
+  main_title = "",
+  sub_title = "E. Australian-born, Seroconversion with CD4 count <350",
+  show_overall = FALSE,  # Don't show overall trend
+  show_segment = TRUE
+)
+
+
+Australia_gsero_segmented_results$segment_results
+Australia_gsero_segmented_results$segment_plot
+
+#unknown CD4
+Australia_gunknown_segmented_results <- analyze_segmented_trend_complete(
+  data = hiv_data,
+  start_year = 2001,
+  end_year = 2024,
+  cd4_count_filter = NA,
+  count_period = "monthly",
+  include_overseas = FALSE,
+  au_birth_filter = "Australia",
+  family_type  = "NB",
+  num_changes = 5,
+  main_title = "",
+  sub_title = "F. Australian-born, Unknown CD4 count",
+  show_overall = FALSE,  # Don't show overall trend
+  show_segment = TRUE
+)
+
+Australia_gunknown_segmented_results$segment_results
+Australia_gunknown_segmented_results$segment_plot
+
+
+#### Combined plot cd4 group ####
+library(patchwork)
+Australia_cd4_group_segment_plot <- (
+  wrap_plots(
+    Australia_g200_segmented_results$segment_plot,
+    Australia_g200_350_segmented_results$segment_plot,
+    Australia_g350_500_segmented_results$segment_plot,
+    Australia_g500_segmented_results$segment_plot,
+    Australia_gsero_segmented_results$segment_plot,
+    Australia_gunknown_segmented_results$segment_plot,
+    nrow = 3
+  ) + plot_layout(guides = "collect")
+) & theme(legend.position = "bottom")
+
+#### Save figures ####
+SaveFigure <- function(folder, filename, figure, 
+    format = ".png", width = 45, 
+    height = 22.5, units = "cm", dpi = 600,...) {
+    ggsave(file.path(folder, paste(filename, format, sep = "")), 
+      plot = figure, width = width, height = height, units = units,dpi=dpi, ...)
+}
+
+# If figure not already created make sure it is not overwritten
+if (!file.exists(file.path(figFolder, "cd4_group_segment_plot_2001_2024_202511181.png"))) {
+  SaveFigure(figFolder,"cd4_group_segment_plot_2001_2024_20251118", cd4_group_segment_plot)
+}
+
+if (!file.exists(file.path(figFolder, "Overseas_cd4_group_segment_plot_2001_2024_202511181.png"))) {
+  SaveFigure(figFolder,"Overseas_cd4_group_segment_plot_2001_2024_20251118", Overseas_cd4_group_segment_plot)
+}
+
+if (!file.exists(file.path(figFolder, "Australia_cd4_group_segment_plot_2001_2024_202511181.png"))) {
+  SaveFigure(figFolder,"Australia_cd4_group_segment_plot_2001_2024_20251118", Australia_cd4_group_segment_plot)
+}
 
 #### Export results to CSV files ####
 # Function to combine results across populations
@@ -1260,14 +1873,17 @@ all_results <- list(
   PDO_segmented_results,
   AB_segmented_results,
   OB_segmented_results,
-  AB_MSM_segmented_results,
-  OB_MSM_segmented_results,
   MSM_segmented_results,
   Hetero_segmented_results,
+  age_18_29_segmented_results,
+  age_30_49_segmented_results,
+  age_50_plus_segmented_results,
+  AB_MSM_segmented_results,
+  OB_MSM_segmented_results,
+  AB_Hetero_segmented_results,
+  OB_Hetero_segmented_results,
   Hetero_Male_segmented_results,
-  Female_segmented_results,
-  late_diag_segmented_results,
-  advanced_diag_segmented_results
+  Female_segmented_results
 )
 
 # Create corresponding population labels
@@ -1276,14 +1892,17 @@ population_labels <- c(
   "Previously diagnosed overseas",
   "Australian-born",
   "Overseas-born",
-  "Australian-born MSM",
-  "Overseas-born MSM",
   "MSM",
   "Heterosexual",
+  "Age 18-29",
+  "Age 30-49",
+  "Age 50+",
+  "Australian-born MSM",
+  "Overseas-born MSM",
+  "Australian-born Heterosexual",
+  "Overseas-born Heterosexual",
   "Heterosexual men",
-  "Women",
-  "Late diagnosis",
-  "Advanced diagnosis"
+  "Women"
 )
 
 # Combine all results
@@ -1306,6 +1925,24 @@ cd4_results <- list(
   gunknown_segmented_results
 )
 
+Overseas_cd4_results <- list(
+  Overseas_g200_segmented_results,
+  Overseas_g200_350_segmented_results,
+  Overseas_g350_500_segmented_results,
+  Overseas_g500_segmented_results,
+  Overseas_gsero_segmented_results,
+  Overseas_gunknown_segmented_results
+)
+
+Australia_cd4_results <- list(
+  Australia_g200_segmented_results,
+  Australia_g200_350_segmented_results,
+  Australia_g350_500_segmented_results,
+  Australia_g500_segmented_results,
+  Australia_gsero_segmented_results,
+  Australia_gunknown_segmented_results
+)
+
 # cd4_population_labels
 cd4_population_labels <- c(
   "CD4 <200",
@@ -1319,21 +1956,26 @@ cd4_population_labels <- c(
 # cd4_combined_results
 cd4_combined_results <- combine_segmented_results(cd4_results, cd4_population_labels)
 
+Overseas_cd4_combined_results <- combine_segmented_results(Overseas_cd4_results, cd4_population_labels)
+
+Australia_cd4_combined_results <- combine_segmented_results(Australia_cd4_results, cd4_population_labels)
+
 # If file not already created make sure it is not overwritten
-if (!file.exists(file.path(resultsFolder, "combined_each_slope_results_20251104.csv"))) {
-write.csv(combined_results$segment_results, file.path(resultsFolder, "combined_each_slope_results_20251104.csv"), row.names=TRUE)
+if (!file.exists(file.path(resultsFolder, "combined_each_slope_results_20251121.csv"))) {
+write.csv(combined_results$segment_results, file.path(resultsFolder, "combined_each_slope_results_20251121.csv"), row.names=TRUE)
 }
-if (!file.exists(file.path(resultsFolder, "combined_aapc_each_results_20251104.csv"))) {
-write.csv(combined_results$overall_summary, file.path(resultsFolder, "combined_aapc_each_results_202511041.csv"), row.names=TRUE)
+if (!file.exists(file.path(resultsFolder, "combined_aapc_each_results_20251121.csv"))) {
+write.csv(combined_results$overall_summary, file.path(resultsFolder, "combined_aapc_each_results_20251121.csv"), row.names=TRUE)
 }
-if (!file.exists(file.path(resultsFolder, "combined_bic_results_20251104.csv"))) {
-write.csv(combined_results$bic_candidates, file.path(resultsFolder, "combined_bic_results_20251104.csv"), row.names=TRUE)
+if (!file.exists(file.path(resultsFolder, "combined_bic_results_20251121.csv"))) {
+write.csv(combined_results$bic_candidates, file.path(resultsFolder, "combined_bic_results_20251121.csv"), row.names=TRUE)
 }
-if (!file.exists(file.path(resultsFolder, "combined_change_points_results_20251104.csv"))) {
-write.csv(combined_results$change_points, file.path(resultsFolder, "combined_change_points_results_20251104.csv"), row.names=TRUE)
+
+if (!file.exists(file.path(resultsFolder, "combined_change_points_results_20251121.csv"))) {
+write.csv(combined_results$change_points, file.path(resultsFolder, "combined_change_points_results_20251121.csv"), row.names=TRUE)
 }
-if (!file.exists(file.path(resultsFolder, "combined_wald_adjacent_slopes_results_20251104.csv"))) {
-write.csv(combined_results$wald_adjacent_slopes, file.path(resultsFolder, "combined_wald_adjacent_slopes_results_20251104.csv"), row.names=TRUE)
+if (!file.exists(file.path(resultsFolder, "combined_wald_adjacent_slopes_results_20251121.csv"))) {
+write.csv(combined_results$wald_adjacent_slopes, file.path(resultsFolder, "combined_wald_adjacent_slopes_results_20251121.csv"), row.names=TRUE)
 }
 
 # If file not already created make sure it is not overwritten
@@ -1353,9 +1995,39 @@ if (!file.exists(file.path(resultsFolder, "cd4_combined_wald_adjacent_slopes_res
 write.csv(cd4_combined_results$wald_adjacent_slopes, file.path(resultsFolder, "cd4_combined_wald_adjacent_slopes_results_20251118.csv"), row.names=TRUE)
 }
 
+# If file not already created make sure it is not overwritten
+if (!file.exists(file.path(resultsFolder, "Overseas_cd4_combined_each_slope_results_20251118.csv"))) {
+write.csv(Overseas_cd4_combined_results$segment_results, file.path(resultsFolder, "Overseas_cd4_combined_each_slope_results_20251118.csv"), row.names=TRUE)
+}
+if (!file.exists(file.path(resultsFolder, "Overseas_cd4_combined_aapc_each_results_202511181.csv"))) {
+write.csv(Overseas_cd4_combined_results$overall_summary, file.path(resultsFolder, "Overseas_cd4_combined_aapc_each_results_202511181.csv"), row.names=TRUE)
+}
+if (!file.exists(file.path(resultsFolder, "Overseas_cd4_combined_bic_results_20251118.csv"))) {
+write.csv(Overseas_cd4_combined_results$bic_candidates, file.path(resultsFolder, "Overseas_cd4_combined_bic_results_20251118.csv"), row.names=TRUE)
+}
+if (!file.exists(file.path(resultsFolder, "Overseas_cd4_combined_change_points_results_20251118.csv"))) {
+write.csv(Overseas_cd4_combined_results$change_points, file.path(resultsFolder, "Overseas_cd4_combined_change_points_results_20251118.csv"), row.names=TRUE)
+}
+if (!file.exists(file.path(resultsFolder, "Overseas_cd4_combined_wald_adjacent_slopes_results_20251118.csv"))) {
+write.csv(Overseas_cd4_combined_results$wald_adjacent_slopes, file.path(resultsFolder, "Overseas_cd4_combined_wald_adjacent_slopes_results_20251118.csv"), row.names=TRUE)
+}
 
-
-
+# If file not already created make sure it is not overwritten
+if (!file.exists(file.path(resultsFolder, "Australia_cd4_combined_each_slope_results_20251118.csv"))) {
+write.csv(Australia_cd4_combined_results$segment_results, file.path(resultsFolder, "Australia_cd4_combined_each_slope_results_20251118.csv"), row.names=TRUE)
+}
+if (!file.exists(file.path(resultsFolder, "Australia_cd4_combined_aapc_each_results_202511181.csv"))) {
+write.csv(Australia_cd4_combined_results$overall_summary, file.path(resultsFolder, "Australia_cd4_combined_aapc_each_results_202511181.csv"), row.names=TRUE)
+}
+if (!file.exists(file.path(resultsFolder, "Australia_cd4_combined_bic_results_20251118.csv"))) {
+write.csv(Australia_cd4_combined_results$bic_candidates, file.path(resultsFolder, "Australia_cd4_combined_bic_results_20251118.csv"), row.names=TRUE)
+}
+if (!file.exists(file.path(resultsFolder, "Australia_cd4_combined_change_points_results_20251118.csv"))) {
+write.csv(Australia_cd4_combined_results$change_points, file.path(resultsFolder, "Australia_cd4_combined_change_points_results_20251118.csv"), row.names=TRUE)
+}
+if (!file.exists(file.path(resultsFolder, "Australia_cd4_combined_wald_adjacent_slopes_results_20251118.csv"))) {
+write.csv(Australia_cd4_combined_results$wald_adjacent_slopes, file.path(resultsFolder, "Australia_cd4_combined_wald_adjacent_slopes_results_20251118.csv"), row.names=TRUE)
+}
 
 
 
@@ -2389,13 +3061,13 @@ combined_plot_phn_2001_24 <-
 ####save figure for combined plot####
 SaveFigure <- function(folder, filename, figure, 
     format = ".png", width = 25, 
-    height = 37.5, units = "cm", dpi = 600,...) {
+    height = 25, units = "cm", dpi = 600,...) {
     ggsave(file.path(folder, paste(filename, format, sep = "")), 
       plot = figure, width = width, height = height, units = units,dpi=dpi, ...)
 }
 
-if (!file.exists(file.path(figFolder, "combined_plot_phn_hiv_rates_2001_24_20251010.png"))) {
-    SaveFigure(figFolder,"combined_plot_phn_hiv_rates_2001_24_20251010", combined_plot_phn_hiv_rates_2001_24)
+if (!file.exists(file.path(figFolder, "combined_plot_phn_hiv_rates_2001_24_20251120.png"))) {
+    SaveFigure(figFolder,"combined_plot_phn_hiv_rates_2001_24_20251120", combined_plot_phn_hiv_rates_2001_24)
 }
 if (!file.exists(file.path(figFolder, "combined_plot_phn_2001_24_202511191.png"))) {
     SaveFigure(figFolder,"combined_plot_phn_2001_24_20251119", combined_plot_phn_2001_24)

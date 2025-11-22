@@ -6,8 +6,10 @@ create_cd4_rainbow_plot <- function(data,
                                     # Updated filtering options
                                     previ_diag_overseas = NULL,
                                     exposure_filter = NULL,       # hiv_exposure_risk
-                                    gender_filter = NULL,         # gender
+                                    sex_filter = NULL,         # sex
+                                    age_filter = NULL,         # age_group
                                     region_birth_filter = NULL,   # region_birth
+                                    au_birth_filter = NULL,        # au_birth
                                     lang_home_filter = NULL,      # lang_home
                                     place_acq_filter = NULL,      # place_acq
                                     state_res_filter = NULL,      # state_res
@@ -60,29 +62,49 @@ create_cd4_rainbow_plot <- function(data,
   if (!is.null(exposure_filter)) {
     if ("hiv_exposure_risk" %in% names(plot_data)) {
       plot_data <- plot_data %>% 
-        filter(hiv_exposure_risk == exposure_filter)
+        filter(hiv_exposure_risk %in% exposure_filter)
     } else {
       warning("hiv_exposure_risk variable not found in dataset")
     }
   }
   
-  # Gender
-  if (!is.null(gender_filter)) {
-    if ("gender" %in% names(plot_data)) {
+  # sex
+  if (!is.null(sex_filter)) {
+    if ("sex" %in% names(plot_data)) {
       plot_data <- plot_data %>% 
-        filter(gender == gender_filter)
+        filter(sex %in% sex_filter)
     } else {
-      warning("gender variable not found in dataset")
+      warning("sex variable not found in dataset")
     }
   }
+  
+  # age 
+  if (!is.null(age_filter)) {
+    if ("age_hiv_notif" %in% names(plot_data)) {
+      plot_data <- plot_data %>% 
+        filter(age_hiv_notif %in% age_filter)
+    } else {
+      warning("age variable not found in dataset")
+    }
+  } 
   
   # Region of birth
   if (!is.null(region_birth_filter)) {
     if ("region_birth" %in% names(plot_data)) {
       plot_data <- plot_data %>% 
-        filter(region_birth == region_birth_filter)
+        filter(region_birth %in% region_birth_filter)
     } else {
       warning("region_birth variable not found in dataset")
+    }
+  }
+  
+  # australian born or not
+  if (!is.null(au_birth_filter)) {
+    if ("au_birth" %in% names(plot_data)) {
+      plot_data <- plot_data %>% 
+        filter(au_birth == au_birth_filter)
+    } else {
+      warning("au_birth variable not found in dataset")
     }
   }
   
@@ -369,8 +391,10 @@ create_cd4_absolute_rainbow_plot <- function(data,
                                              # Filtering options
                                              previ_diag_overseas = NULL,
                                              exposure_filter = NULL,       # hiv_exposure_risk
-                                             gender_filter = NULL,         # gender
+                                             sex_filter = NULL,         # sex
+                                             age_filter = NULL,         # age_group
                                              region_birth_filter = NULL,   # region_birth
+                                             au_birth_filter = NULL,        # au_birth
                                              lang_home_filter = NULL,      # lang_home
                                              place_acq_filter = NULL,      # place_acq
                                              state_res_filter = NULL,      # state_res
@@ -423,21 +447,31 @@ create_cd4_absolute_rainbow_plot <- function(data,
   if (!is.null(exposure_filter)) {
     if ("hiv_exposure_risk" %in% names(plot_data)) {
       plot_data <- plot_data %>% 
-        filter(hiv_exposure_risk == exposure_filter)
+        filter(hiv_exposure_risk %in% exposure_filter)
     } else {
       warning("hiv_exposure_risk variable not found in dataset")
     }
   }
   
-  # Gender
-  if (!is.null(gender_filter)) {
-    if ("gender" %in% names(plot_data)) {
+  # sex
+  if (!is.null(sex_filter)) {
+    if ("sex" %in% names(plot_data)) {
       plot_data <- plot_data %>% 
-        filter(gender == gender_filter)
+        filter(sex == sex_filter)
     } else {
-      warning("gender variable not found in dataset")
+      warning("sex variable not found in dataset")
     }
   }
+  
+  # age 
+  if (!is.null(age_filter)) {
+    if ("age_hiv_notif" %in% names(plot_data)) {
+      plot_data <- plot_data %>% 
+        filter(age_hiv_notif %in% age_filter)
+    } else {
+      warning("age variable not found in dataset")
+    }
+  }  
   
   # Region of birth
   if (!is.null(region_birth_filter)) {
@@ -446,6 +480,16 @@ create_cd4_absolute_rainbow_plot <- function(data,
         filter(region_birth == region_birth_filter)
     } else {
       warning("region_birth variable not found in dataset")
+    }
+  }
+  
+  # australian born or not
+  if (!is.null(au_birth_filter)) {
+    if ("au_birth" %in% names(plot_data)) {
+      plot_data <- plot_data %>% 
+        filter(au_birth == au_birth_filter)
+    } else {
+      warning("au_birth variable not found in dataset")
     }
   }
   

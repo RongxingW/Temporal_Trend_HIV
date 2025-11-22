@@ -24,6 +24,7 @@ get_trend_data <- function(data,
                            end_year = NULL,
                            # Filtering options
                            exposure_filter = NULL,       # hiv_exposure_risk
+                           age_filter = NULL,            # age_group
                            gender_filter = NULL,         # gender
                            region_birth_filter = NULL,   # region_birth
                            au_birth_filter = NULL,       # au_birth
@@ -64,6 +65,12 @@ get_trend_data <- function(data,
   if (!is.null(exposure_filter)) {
     plot_data <- plot_data %>% 
       filter(hiv_exposure_risk %in% exposure_filter)
+  }
+  
+  # age group
+  if (!is.null(age_filter)) {
+    plot_data <- plot_data %>% 
+      filter(age_hiv_notif %in% age_filter)
   }
   
   # Gender
@@ -218,6 +225,7 @@ get_cd4_quantile_trend_data <- function(
     start_year = NULL,
     end_year = NULL,
     exposure_filter = NULL,      # hiv_exposure_risk
+    age_filter = NULL,           # age_group
     gender_filter = NULL,        # gender (sex)
     region_birth_filter = NULL,  # region_birth
     au_birth_filter = NULL,      # au_birth
@@ -246,6 +254,7 @@ get_cd4_quantile_trend_data <- function(
   
   # Filters
   if (!is.null(exposure_filter))    plot_data <- plot_data %>% filter(hiv_exposure_risk %in% exposure_filter)
+  if (!is.null(age_filter))         plot_data <- plot_data %>% filter(age_hiv_notif %in% age_filter)
   if (!is.null(gender_filter))      plot_data <- plot_data %>% filter(sex == gender_filter)
   if (!is.null(region_birth_filter))plot_data <- plot_data %>% filter(region_birth == region_birth_filter)
   if (!is.null(au_birth_filter))    plot_data <- plot_data %>% filter(au_birth == au_birth_filter)
@@ -565,6 +574,7 @@ analyze_overall_trend <- function(data,
                                   end_year = NULL,
                                   # Filtering options
                                   exposure_filter = NULL,      # hiv_exposure_risk
+                                  age_filter = NULL,           # age_group
                                   gender_filter = NULL,        # gender
                                   region_birth_filter = NULL,  # region_birth
                                   au_birth_filter = NULL,      # au_birth
@@ -595,6 +605,7 @@ analyze_overall_trend <- function(data,
     start_year = start_year,
     end_year = end_year,
     exposure_filter = exposure_filter,
+    age_filter = age_filter,
     gender_filter = gender_filter,
     region_birth_filter = region_birth_filter,
     au_birth_filter = au_birth_filter,
@@ -614,6 +625,7 @@ analyze_overall_trend <- function(data,
   # Create title based on filters
   title_parts <- c()
   if (!is.null(exposure_filter)) title_parts <- c(title_parts, paste0("Exposure: ", exposure_filter))
+  if (!is.null(age_filter)) title_parts <- c(title_parts, paste0("Age group: ", age_filter))
   if (!is.null(gender_filter)) title_parts <- c(title_parts, paste0("Gender: ", gender_filter))
   if (!is.null(region_birth_filter)) title_parts <- c(title_parts, paste0("Birth region: ", region_birth_filter))
   if (!is.null(au_birth_filter)) title_parts <- c(title_parts, paste0("Birth place: ", au_birth_filter))
@@ -1095,6 +1107,7 @@ analyze_segmented_trend_complete <- function(data,
                                              start_year = NULL,
                                              end_year = NULL,
                                              exposure_filter = NULL,
+                                             age_filter = NULL,
                                              gender_filter = NULL,
                                              region_birth_filter = NULL,
                                              au_birth_filter = NULL,
@@ -1124,6 +1137,7 @@ analyze_segmented_trend_complete <- function(data,
     start_year = start_year,
     end_year = end_year,
     exposure_filter = exposure_filter,
+    age_filter = age_filter,
     gender_filter = gender_filter,
     region_birth_filter = region_birth_filter,
     au_birth_filter = au_birth_filter,
@@ -1350,6 +1364,7 @@ analyze_segmented_trend_complete <- function(data,
       start_year = start_year,
       end_year = end_year,
       exposure_filter = exposure_filter,
+      age_filter = age_filter,
       gender_filter = gender_filter,
       region_birth_filter = region_birth_filter,
       au_birth_filter = au_birth_filter,
