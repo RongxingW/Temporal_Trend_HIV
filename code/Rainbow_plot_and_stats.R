@@ -1,3 +1,13 @@
+# =============================================================================
+# Rainbow_plot_and_stats.R  —  sourced by 1_timeseriesAnalysis.Rmd
+# Builds "rainbow" plots of CD4 count at HIV diagnosis over time: the proportion
+# (create_cd4_rainbow_plot) and absolute/monthly-average number
+# (create_cd4_absolute_rainbow_plot) of notifications in CD4 strata.
+# CD4 strata follow clinical staging (<200, 200-349, 350-499, >=500 cells/mm3).
+# Both functions share the same filtering arguments (exposure, birthplace, sex,
+# age, PHN, etc.).
+# =============================================================================
+
 ####Function to create a rainbow plot for the proportion of different level of CD4 count at diagnosis####
 create_cd4_rainbow_plot <- function(data, 
                                     start_year = NULL,
@@ -406,7 +416,8 @@ create_cd4_absolute_rainbow_plot <- function(data,
                                              # Colors for the CD4 categories from bottom to top
                                              colors = c("#999999","#CC79A7","#0072B2","#009E73","#F0E442","#E69F00","#D55E00"),
                                              legend_position = "bottom",
-                                             dash_line = FALSE) {          # Option to add median CD4 line
+                                             dash_line = FALSE,
+                                             monthly_average = FALSE) {          # Option to add median CD4 line
   
   # Load required libraries
   require(tidyverse)
@@ -593,7 +604,11 @@ create_cd4_absolute_rainbow_plot <- function(data,
     mutate(
       count = ifelse(is.na(count), 0, count)
     )
-  
+  # convert annual counts to monthly average
+  if (monthly_average) {
+    summary_data_complete <- summary_data_complete %>%
+      mutate(count = count / 12)
+  }  
   # Check if we have any "Unknown" category data
   has_unknown <- any(summary_data_complete$cd4_category == "Unknown" & summary_data_complete$count > 0)
   
@@ -632,7 +647,7 @@ create_cd4_absolute_rainbow_plot <- function(data,
   
   # Calculate the maximum count sum to set appropriate y-axis limits
   max_year_count <- max(year_totals$total)
-  max_y_value <- ceiling(max_year_count * 1.1 / 50) * 50  # Round up to nearest 50 with 10% buffer
+  max_y_value <- ceiling(max_year_count * 1.1 / ifelse(monthly_average, 5, 50)) * ifelse(monthly_average, 5, 50)  # Round up to nearest 50 with 10% buffer
   
   # Create the base plot - now using absolute counts
   p <- ggplot(summary_data_complete, aes(x = year_diag, y = count, fill = cd4_category)) +
@@ -647,10 +662,12 @@ create_cd4_absolute_rainbow_plot <- function(data,
       limits = c(min(years) - 0.0005, max(years) + 0.0005)
     ) +
     scale_y_continuous(
-      breaks = seq(0, max_y_value, by = ifelse(max_y_value > 500, 100, 50)),
+      breaks = seq(0, max_y_value, 
+                   by = if (max_y_value > 500) 100 else if (max_y_value > 100) 50 else if (max_y_value > 20) 10 else 5),
       expand = c(0, 0),
       limits = c(0, max_y_value),
-      name = "Number of Diagnoses"
+      name = if (monthly_average) "Number of notifications"               
+      else "Number of notifications"
     )
   
   # Add median CD4 line and secondary y-axis if requested
@@ -715,7 +732,8 @@ create_cd4_absolute_rainbow_plot <- function(data,
         breaks = seq(0, max_y_value, by = ifelse(max_y_value > 500, 100, 50)),
         expand = c(0, 0),
         limits = c(0, max_y_value),
-        name = "Number of Diagnoses",
+        name = if (monthly_average) "Number of notifications"              
+        else "Number of notifications", 
         sec.axis = sec_axis(
           ~ . * y2_max / max_y_value, 
           name = "Median CD4 Count (cells/μL)",

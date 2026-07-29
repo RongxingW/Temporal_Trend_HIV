@@ -14,3 +14,6 @@ projects/2000_2024_changing_point/*
 #projects/late_hiv_diagnosis/data/*
 #!projects/late_hiv_diagnosis/data/xxx.csv
 .Rproj.user
+
+2_notesorothers.Rmd
+2_personal_use_timeseriesAnalysis.Rmd

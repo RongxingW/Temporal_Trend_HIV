@@ -1,7 +1,11 @@
-#0-SetupProject#
-================
-This file is to create a new project for the time series analysis.
-The example used is project investigating changing points for HIV notifications from 2000 to 2024.
+# =============================================================================
+# 0_Setupmodel.Rmd
+# Purpose : Create the folder structure for one time-series analysis project.
+# Usage   : Run this FIRST, once per project. It only creates empty
+#           data/output/figures folders under projects/<name>/.
+#           Then place the input CSVs (see 1_timeseriesAnalysis.Rmd header)
+#           into projects/<name>/data/ before running 1_timeseriesAnalysis.Rmd.
+# =============================================================================
 
 ```{r Initialise}
 # Only requires base R

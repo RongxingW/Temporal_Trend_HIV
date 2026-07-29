@@ -1,3 +1,10 @@
+# =============================================================================
+# Joinpoint_analysis.R  —  sourced by 1_timeseriesAnalysis.Rmd
+# Segmented ("joinpoint") regression of HIV notification counts over time.
+# Counts modelled with Poisson or Negative Binomial GLMs; breakpoints estimated
+# with the 'segmented' package.
+# =============================================================================
+
 # Helper function to select every nth element (for plot labels)
 # Keeps only every n-th label (or hides every n-th) so time-axis labels stay readable in plots.
 EveryNth <- function(x, n, inverse = FALSE) {
@@ -16,6 +23,19 @@ EveryNth <- function(x, n, inverse = FALSE) {
     return(result)
   }
 }
+
+# Internal helper: divisor for converting per-year slope to per-month/quarter/year
+.pc_divisor <- function(pc_period = c("annual", "monthly", "quarterly")) {
+  pc_period <- match.arg(pc_period)
+  switch(pc_period, "annual" = 1, "monthly" = 12, "quarterly" = 4)
+}
+
+# Internal helper: human-readable period word used in result-table column names
+.pc_word <- function(pc_period = c("annual", "monthly", "quarterly")) {
+  pc_period <- match.arg(pc_period)
+  switch(pc_period, "annual" = "Year", "monthly" = "Month", "quarterly" = "Quarter")
+}
+
 
 # Function to get data in correct format for trend analysis
 # Updated to handle YYYY-MM format properly
@@ -328,8 +348,8 @@ get_cd4_quantile_trend_data <- function(
 
 # Fits the overall time trend using Poisson or Negative Binomial 
 # and reports the estimated change, confidence interval, and p-value.
-get_trend <- function(trend_data, family_type = "poisson") {
-  
+get_trend <- function(trend_data, family_type = "poisson", pc_period = "annual") {
+  divisor <- .pc_divisor(pc_period)
   # If trend_data came from CD4 mode, prefer gaussian
   cd4_mode <- isTRUE(attr(trend_data, "cd4_mode"))
   if (cd4_mode && tolower(family_type) %in% c("poisson","nb")) {
@@ -354,10 +374,11 @@ get_trend <- function(trend_data, family_type = "poisson") {
     # For Gaussian, 'coeff' is the slope (Δ CD4 per year)
     return(list(
       model = gaus_model,
-      coeff = unname(beta),
-      interval = unname(ci_lin),
+      coeff = unname(beta)/ divisor,
+      interval = unname(ci_lin)/ divisor,
       p_value = p_value,
       type_used = "gaussian",
+      pc_period = pc_period, 
       dispersion = NA_real_
     ))
   }
@@ -383,8 +404,8 @@ get_trend <- function(trend_data, family_type = "poisson") {
     zcrit <- qnorm(0.975)
     ci_lin <- c(beta - zcrit * se, beta + zcrit * se)
     p_value <- 2 * pnorm(-abs(beta / se))
-    coeff   <- exp(beta)
-    interval <- exp(ci_lin)
+    coeff   <- exp(beta/ divisor)
+    interval <- exp(ci_lin/ divisor)
     
     return(list(
       model = pois_model,
@@ -392,6 +413,7 @@ get_trend <- function(trend_data, family_type = "poisson") {
       interval = interval,
       p_value = p_value,
       type_used = "poisson",
+      pc_period = pc_period,
       dispersion = dispersion
     ))
   }
@@ -410,8 +432,8 @@ get_trend <- function(trend_data, family_type = "poisson") {
     zcrit <- qnorm(0.975)
     ci_lin <- c(beta - zcrit * se, beta + zcrit * se)
     p_value <- 2 * pnorm(-abs(beta / se))
-    coeff   <- exp(beta)
-    interval <- exp(ci_lin)
+    coeff   <- exp(beta/ divisor)
+    interval <- exp(ci_lin/ divisor)
     
     return(list(
       model = nb_model,
@@ -419,6 +441,7 @@ get_trend <- function(trend_data, family_type = "poisson") {
       interval = interval,
       p_value = p_value,
       type_used = "NB",
+      pc_period = pc_period,
       dispersion = NA_real_
     ))
   }
@@ -472,7 +495,7 @@ overall_trend_plot <- function(trend_data, trend_model, count_period = "monthly"
       "",
       values = c(data = "#82afda", overall = "#EE7C7A"),
       labels = c(data = if (cd4_mode) "Observed CD4" else "HIV data",
-                 overall = if (cd4_mode) "Overall mean CD4 trend" else "Fitted trend")
+                 overall = if (cd4_mode) "Overall mean CD4 trend" else "Fitted trends")
     ) +
     scale_y_continuous(
       limits = c(0, auto_upper),
@@ -588,6 +611,7 @@ analyze_overall_trend <- function(data,
                                   count_period = "monthly",    # "monthly", "quarterly", or "annually"
                                   include_overseas = FALSE,     # Include previously diagnosed overseas
                                   family_type = "poisson",            # "poisson" or "linear"
+                                  pc_period   = "annual",
                                   save_plots = FALSE,          # Whether to save plots
                                   output_dir = NULL,           # Directory to save plots
                                   plot_name_prefix = "hiv_trend",
@@ -648,7 +672,7 @@ analyze_overall_trend <- function(data,
   # Auto-switch family when CD4
   fam <- if (CD4 && tolower(family_type) %in% c("poisson","nb")) "gaussian" else family_type
   
-  overall_trend <- get_trend(trend_data, family_type = fam)
+  overall_trend <- get_trend(trend_data, family_type = fam, pc_period = pc_period)
   
   # Create overall trend plot
   overall_plot <- overall_trend_plot(trend_data, overall_trend$model, count_period = count_period) +
@@ -668,18 +692,20 @@ analyze_overall_trend <- function(data,
   }
   
   # Results table: interpret based on family
+  period_word <- .pc_word(pc_period) 
   if (tolower(overall_trend$type_used) == "gaussian") {
     overall_results <- data.frame(
-      Model = "Overall Trend (Gaussian)",
-      Slope_per_Year = overall_trend$coeff,       # Δ CD4 per year
+      Model = paste0("Overall Trend (Gaussian, per ", tolower(period_word), ")"),
+      Slope = overall_trend$coeff,       # Δ CD4 per year
       Lower_CI = overall_trend$interval[1],
       Upper_CI = overall_trend$interval[2],
       P_value = overall_trend$p_value,
       stringsAsFactors = FALSE
     )
+    names(overall_results)[2] <- paste0("Slope_per_", period_word)
   } else {
     overall_results <- data.frame(
-      Model = "Overall Trend",
+      Model = paste0("Overall Trend (per ", tolower(period_word), ")"),
       Estimate = overall_trend$coeff,
       Lower_CI = overall_trend$interval[1],
       Upper_CI = overall_trend$interval[2],
@@ -704,9 +730,9 @@ seg_CI <- function(est, std_err) {
 
 # Fits a joinpoint (segmented) model on top of the base trend, 
 # returning breakpoints with CIs, segment-specific slopes, and BIC.
-get_segmented_trend <- function(overall_model, initial_changes, family_type = "poisson") {
+get_segmented_trend <- function(overall_model, initial_changes, family_type = "poisson",pc_period   = "annual") {
   require(segmented)
-  
+  divisor <- .pc_divisor(pc_period)
   base_df <- as.data.frame(stats::model.frame(overall_model))
   if (!is.numeric(base_df$time)) base_df$time <- as.numeric(base_df$time)
   base_formula <- stats::formula(overall_model)
@@ -780,15 +806,15 @@ get_segmented_trend <- function(overall_model, initial_changes, family_type = "p
     s <- slope(segment_trend)$time
     if (use_gaussian) {
       list(
-        est = s[, "Est."],
-        lo  = s[, "CI(95%).l"],
-        up  = s[, "CI(95%).u"]
+        est = s[, "Est."]/ divisor,
+        lo  = s[, "CI(95%).l"]/ divisor,
+        up  = s[, "CI(95%).u"]/ divisor
       )
     } else {
       list(
-        est = exp(s[, "Est."]),
-        lo  = exp(s[, "CI(95%).l"]),
-        up  = exp(s[, "CI(95%).u"])
+        est = exp(s[, "Est."]/ divisor),
+        lo  = exp(s[, "CI(95%).l"]/ divisor),
+        up  = exp(s[, "CI(95%).u"]/ divisor)
       )
     }
   }, error = function(e) {
@@ -830,7 +856,7 @@ get_segmented_trend <- function(overall_model, initial_changes, family_type = "p
         p_value        = pvals,
         JP_Time        = jp_time,
         JP_Time_Month  = if (length(jp_time)) to_month(jp_time) else character(0),
-        Exp_Estimate   = if (use_gaussian) NA_real_ else exp(out[, "Estimate"]),
+        Exp_Estimate   = if (use_gaussian) NA_real_ else exp(out[, "Estimate"] / divisor),
         stringsAsFactors = FALSE
       )
     }
@@ -888,6 +914,7 @@ get_segmented_trend <- function(overall_model, initial_changes, family_type = "p
     bics = c("segment_BIC" = seg_BIC, "overall_BIC" = base_BIC),
     model_type = if (use_gaussian) "gaussian" else if (use_nb) "NB" else "poisson",
     wald_slope_change = wald_tab,
+    pc_period         = pc_period,
     aapc = aapc
   )
 }
@@ -896,7 +923,7 @@ get_segmented_trend <- function(overall_model, initial_changes, family_type = "p
 
 
 # (Helper) Fits a model with exactly k joinpoints and returns that model’s BIC for comparison.
-.fit_k_joinpoints <- function(base_model, data_years, k, family_type = "poisson") {
+.fit_k_joinpoints <- function(base_model, data_years, k, family_type = "poisson",pc_period   = "annual") {
   # k = 0 -> no joinpoint: use base_model
   if (k == 0) {
     return(list(
@@ -922,7 +949,7 @@ get_segmented_trend <- function(overall_model, initial_changes, family_type = "p
   min_year <- min(data_years); max_year <- max(data_years)
   initial_points <- seq(min_year, max_year, length.out = k + 2)[2:(k + 1)]
   
-  seg_fit <- get_segmented_trend(base_model, initial_points, family_type = family_type)
+  seg_fit <- get_segmented_trend(base_model, initial_points, family_type = family_type,pc_period = pc_period)
   if (is.null(seg_fit)) {
     return(list(k = k, fit = NULL, bic = Inf))
   }
@@ -934,11 +961,11 @@ get_segmented_trend <- function(overall_model, initial_changes, family_type = "p
 }
 
 # Tries 0..K joinpoints, compares BICs, and picks the model with the best (lowest) BIC.
-find_best_segment_model <- function(model, data_years, num_changes = 1, family_type = "poisson") {
+find_best_segment_model <- function(model, data_years, num_changes = 1, family_type = "poisson",pc_period   = "annual") {
   require(segmented)
   
   # Fit all candidates
-  candidates <- lapply(0:num_changes, function(k) .fit_k_joinpoints(model, data_years, k, family_type = family_type))
+  candidates <- lapply(0:num_changes, function(k) .fit_k_joinpoints(model, data_years, k, family_type = family_type,pc_period   = pc_period))
   
   # Pick the lowest BIC
   bics <- sapply(candidates, function(x) x$bic)
@@ -1053,7 +1080,8 @@ segment_plot <- function(trend_data, trend_model, count_period = "monthly",
 
 # Time-weighted mean slope and 95% CI for a Gaussian segmented.glm
 # Uses linear contrast on the coefficient covariance (statistically correct).
-weighted_gaussian_slope_CI <- function(selected, trend_data) {
+weighted_gaussian_slope_CI <- function(selected, trend_data, pc_period = "annual") {
+  divisor <- .pc_divisor(pc_period)
   stopifnot(!is.null(selected$segment_model))
   seg <- selected$segment_model
   
@@ -1083,8 +1111,8 @@ weighted_gaussian_slope_CI <- function(selected, trend_data) {
     cvec[u_idx] <- tail_sums[seq_along(u_idx)]
   }
   
-  mu <- sum(cvec * theta)
-  se <- sqrt(as.numeric(t(cvec) %*% V %*% cvec))
+  mu <- sum(cvec * theta)/ divisor
+  se <- sqrt(as.numeric(t(cvec) %*% V %*% cvec))/ divisor
   ci <- c(mu - 1.96*se, mu + 1.96*se)
   
   list(
@@ -1100,6 +1128,85 @@ weighted_gaussian_slope_CI <- function(selected, trend_data) {
   )
 }
 
+
+# Model-based cumulative change for each segment.
+# - Poisson/NB: cumulative rate ratio = fitted_end/fitted_start ( = slope^L )
+# - Gaussian:    cumulative absolute & relative change in CD4 over the segment
+compute_segment_cumulative_change <- function(selected, trend_data,
+                                              model_type,
+                                              overall_model = NULL,
+                                              pc_period = "annual") {
+  model_type <- tolower(model_type[1])
+  divisor <- .pc_divisor(pc_period)
+  
+  # Segment boundaries from the segmented model
+  tmin <- min(trend_data$time, na.rm = TRUE)
+  tmax <- max(trend_data$time, na.rm = TRUE)
+  jp <- if (!is.null(selected$psi) && nrow(selected$psi) > 0) {
+    as.numeric(selected$psi[, "Est."])
+  } else numeric(0)
+  breaks <- c(tmin, jp, tmax)
+  starts <- breaks[-length(breaks)]
+  ends   <- breaks[-1]
+  L      <- (ends - starts) * divisor   # segment length in pc_period units
+  
+  # Fitted values from the chosen model (segmented if available, else overall)
+  fit_mod <- if (!is.null(selected$segment_model)) selected$segment_model else overall_model
+  fitted_start <- as.numeric(stats::predict(fit_mod,
+                                            newdata = data.frame(time = starts), type = "response"))
+  fitted_end   <- as.numeric(stats::predict(fit_mod,
+                                            newdata = data.frame(time = ends),   type = "response"))
+  
+  slopes    <- selected$slopes
+  slopes_lo <- selected$slopes_lower
+  slopes_up <- selected$slopes_upper
+  
+  if (model_type %in% c("poisson", "nb")) {
+    cum_rr    <- fitted_end / fitted_start
+    cum_rr_lo <- pmin(slopes_lo^L, slopes_up^L)
+    cum_rr_up <- pmax(slopes_lo^L, slopes_up^L)
+    
+    data.frame(
+      Segment_Start_Time       = starts,
+      Segment_End_Time         = ends,
+      Segment_Length_Periods   = L,
+      Fitted_Start             = fitted_start,
+      Fitted_End               = fitted_end,
+      Cumulative_Rate_Ratio    = cum_rr,
+      Cumulative_RR_Lower_CI   = cum_rr_lo,
+      Cumulative_RR_Upper_CI   = cum_rr_up,
+      Cumulative_Pct_Change    = sprintf("%.1f%% (%.1f%% to %.1f%%)",
+                                         (cum_rr    - 1) * 100,
+                                         (cum_rr_lo - 1) * 100,
+                                         (cum_rr_up - 1) * 100),
+      stringsAsFactors = FALSE
+    )
+    
+  } else if (model_type == "gaussian") {
+    abs_change <- fitted_end - fitted_start
+    abs_lo     <- pmin(slopes_lo * L, slopes_up * L)
+    abs_up     <- pmax(slopes_lo * L, slopes_up * L)
+    rel_change <- ifelse(fitted_start != 0, abs_change / fitted_start * 100, NA_real_)
+    rel_lo     <- ifelse(fitted_start != 0, abs_lo     / fitted_start * 100, NA_real_)
+    rel_up     <- ifelse(fitted_start != 0, abs_up     / fitted_start * 100, NA_real_)
+    
+    data.frame(
+      Segment_Start_Time           = starts,
+      Segment_End_Time             = ends,
+      Segment_Length_Periods       = L,
+      Fitted_Start                 = fitted_start,
+      Fitted_End                   = fitted_end,
+      Cumulative_Absolute_Change   = abs_change,
+      Cumulative_Abs_Lower_CI      = abs_lo,
+      Cumulative_Abs_Upper_CI      = abs_up,
+      Cumulative_Pct_Change        = sprintf("%.1f%% (%.1f%% to %.1f%%)",
+                                             rel_change, rel_lo, rel_up),
+      stringsAsFactors = FALSE
+    )
+  } else {
+    stop("Unknown model_type for cumulative change.")
+  }
+}
 
 # End-to-end segmented analysis: prepares data, fits overall model, 
 # selects joinpoints by BIC, converts joinpoints to months, and returns plots and results.
@@ -1121,6 +1228,7 @@ analyze_segmented_trend_complete <- function(data,
                                              count_period = "monthly",
                                              include_overseas = FALSE,
                                              family_type = "poisson",
+                                             pc_period   = "annual",
                                              num_changes = 1,
                                              show_overall = TRUE,
                                              show_segment = TRUE,
@@ -1155,16 +1263,17 @@ analyze_segmented_trend_complete <- function(data,
   )
   
   fam <- if (CD4 && tolower(family_type) %in% c("poisson","nb")) "gaussian" else family_type
-  overall_results <- get_trend(trend_data, family_type = fam)
+  overall_results <- get_trend(trend_data, family_type = fam, pc_period = pc_period)
   overall_trend_model <- overall_results$model
   data_years <- unique(floor(trend_data$time))
   
   selected <- find_best_segment_model(model = overall_trend_model,
                                       data_years = data_years,
                                       num_changes = num_changes,
-                                      family_type = fam)
+                                      family_type = fam,
+                                      pc_period   = pc_period)
   selected_k <- if (!is.null(selected$selected_k)) selected$selected_k else 0
-  
+  period_word <- .pc_word(pc_period)
   if (selected_k == 0) {
     overall_plot <- overall_trend_plot(trend_data, overall_trend_model, count_period = count_period)
     segment_plot_result <- overall_plot + ggtitle(
@@ -1177,26 +1286,46 @@ analyze_segmented_trend_complete <- function(data,
     if (tolower(overall_results$type_used) == "gaussian") {
       segment_results <- data.frame(
         Segment = "Overall",
-        Slope_per_Year = overall_results$coeff,
+        Slope = overall_results$coeff,
         Lower_CI = overall_results$interval[1],
         Upper_CI = overall_results$interval[2],
         Interpretation = ifelse(overall_results$coeff > 0, "Increasing CD4", ifelse(overall_results$coeff < 0, "Decreasing CD4", "Stable")),
         Significant = ifelse(overall_results$interval[1] > 0 | overall_results$interval[2] < 0, "Yes", "No")
       )
+      names(segment_results)[2] <- paste0("Slope_per_", period_word)
     } else {
       segment_results <- data.frame(
         Segment = "Overall",
         Rate_Ratio = overall_results$coeff,
         Lower_CI = overall_results$interval[1],
         Upper_CI = overall_results$interval[2],
-        Percent_Change_Per_Year = sprintf("%.1f%% (%.1f%% to %.1f%%)",
+        Percent_Change = sprintf("%.2f%% (%.2f%% to %.2f%%)",
                                           (overall_results$coeff - 1) * 100,
                                           (overall_results$interval[1] - 1) * 100,
                                           (overall_results$interval[2] - 1) * 100),
         Interpretation = ifelse(overall_results$coeff > 1, "Increasing", ifelse(overall_results$coeff < 1, "Decreasing", "Stable")),
         Significant = ifelse(overall_results$interval[1] > 1 | overall_results$interval[2] < 1, "Yes", "No")
       )
+      names(segment_results)[5] <- paste0("Percent_Change_Per_", period_word)
     }
+    
+    # Model-based cumulative change for the single overall segment
+    pseudo_selected <- list(
+      psi           = NULL,
+      slopes        = overall_results$coeff,
+      slopes_lower  = overall_results$interval[1],
+      slopes_upper  = overall_results$interval[2],
+      segment_model = NULL,
+      model_type    = overall_results$type_used
+    )
+    cum_chg <- compute_segment_cumulative_change(
+      selected      = pseudo_selected,
+      trend_data    = trend_data,
+      model_type    = overall_results$type_used,
+      overall_model = overall_trend_model,
+      pc_period     = pc_period
+    )
+    segment_results <- cbind(segment_results, cum_chg)
     
     change_points_table <- data.frame(Change_Point = integer(0),
                                       Estimate = numeric(0),
@@ -1247,11 +1376,12 @@ analyze_segmented_trend_complete <- function(data,
     if (tolower(selected$model_type) == "gaussian") {
       segment_results <- data.frame(
         Segment = paste0("Segment ", seq_along(selected$slopes)),
-        Slope_per_Year = selected$slopes,
+        Slope = selected$slopes,
         Lower_CI = selected$slopes_lower,
         Upper_CI = selected$slopes_upper
       )
-      segment_results$Change_per_Year <- paste0(
+      names(segment_results)[2] <- paste0("Slope_per_", period_word) 
+      segment_results[[paste0("Change_per_", period_word)]] <- paste0(
         sprintf("%.1f", selected$slopes), " (",
         sprintf("%.1f", selected$slopes_lower), " to ",
         sprintf("%.1f", selected$slopes_upper), ")"
@@ -1271,10 +1401,10 @@ analyze_segmented_trend_complete <- function(data,
         Lower_CI = selected$slopes_lower,
         Upper_CI = selected$slopes_upper
       )
-      segment_results$Percent_Change_Per_Year <- paste0(
-        sprintf("%.1f%%", (selected$slopes - 1) * 100),
-        " (", sprintf("%.1f%%", (selected$slopes_lower - 1) * 100),
-        " to ", sprintf("%.1f%%", (selected$slopes_upper - 1) * 100), ")"
+      segment_results[[paste0("Percent_Change_Per_", period_word)]] <- paste0(
+        sprintf("%.2f%%", (selected$slopes - 1) * 100),
+        " (", sprintf("%.2f%%", (selected$slopes_lower - 1) * 100),
+        " to ", sprintf("%.2f%%", (selected$slopes_upper - 1) * 100), ")"
       )
       segment_results$Interpretation <- ifelse(
         selected$slopes > 1, "Increasing",
@@ -1285,6 +1415,15 @@ analyze_segmented_trend_complete <- function(data,
         "Yes", "No"
       )
     }
+    # Model-based cumulative change per segment
+    cum_chg <- compute_segment_cumulative_change(
+      selected      = selected,
+      trend_data    = trend_data,
+      model_type    = selected$model_type,
+      overall_model = overall_trend_model,
+      pc_period     = pc_period
+    )
+    segment_results <- cbind(segment_results, cum_chg)
     
     wald_results <- if (!is.null(selected$wald_slope_change)) selected$wald_slope_change else
       data.frame(Joinpoint = integer(0), Term = character(0),
@@ -1301,56 +1440,60 @@ analyze_segmented_trend_complete <- function(data,
     if (tolower(overall_results$type_used) == "gaussian") {
       overall_summary <- data.frame(
         Population = "Overall",
-        Average_Slope_CD4_per_Year = unname(overall_results$coeff),
+        Average_Slope = unname(overall_results$coeff),
         Lower_CI = unname(overall_results$interval[1]),
         Upper_CI = unname(overall_results$interval[2]),
         stringsAsFactors = FALSE
       )
+      names(overall_summary)[2] <- paste0("Average_Slope_CD4_per_", period_word) 
     } else {
       # Log-link case (for counts): standard APC/AAPC style
       overall_summary <- data.frame(
         Population = "Overall",
-        Average_APC = unname(overall_results$coeff),
+        Average_PC = unname(overall_results$coeff),
         Lower_CI = unname(overall_results$interval[1]),
         Upper_CI = unname(overall_results$interval[2]),
         Average_Percent_Change = sprintf(
-          "%.1f%% (%.1f%% to %.1f%%)",
+          "%.2f%% (%.2f%% to %.2f%%)",
           (overall_results$coeff - 1) * 100,
           (overall_results$interval[1] - 1) * 100,
           (overall_results$interval[2] - 1) * 100
         ),
         stringsAsFactors = FALSE
       )
+      names(overall_summary)[2] <- paste0("Average_", period_word, "ly_PC")
     }
   } else {
     # Joinpoints selected
     if (tolower(selected$model_type) == "gaussian") {
       # >>> Correct CI for time-weighted mean slope (no heuristic bounds)
       base_df <- as.data.frame(stats::model.frame(overall_trend_model))
-      wg <- weighted_gaussian_slope_CI(selected, base_df)
+      wg <- weighted_gaussian_slope_CI(selected, base_df, pc_period = pc_period)
       
       overall_summary <- data.frame(
         Population = "Overall",
-        Weighted_Slope_CD4_per_Year = wg$weighted_slope,
+        Weighted_Slope = wg$weighted_slope,
         Lower_CI = wg$ci95[1],
         Upper_CI = wg$ci95[2],
         stringsAsFactors = FALSE
       )
+      names(overall_summary)[2] <- paste0("Weighted_Slope_CD4_per_", period_word)  
     } else {
       # Log-link case: AAPC via weighted average of log-slopes
       overall_summary <- data.frame(
         Population = "Overall",
-        Average_APC = selected$aapc$est,
+        Average_PC = selected$aapc$est,
         Lower_CI = selected$aapc$lo,
         Upper_CI = selected$aapc$up,
         Average_Percent_Change = sprintf(
-          "%.1f%% (%.1f%% to %.1f%%)",
+          "%.2f%% (%.2f%% to %.2f%%)",
           (selected$aapc$est - 1) * 100,
           (selected$aapc$lo  - 1) * 100,
           (selected$aapc$up  - 1) * 100
         ),
         stringsAsFactors = FALSE
       )
+      names(overall_summary)[2] <- paste0("Average_", period_word, "ly_PC")
     }
   }
   
@@ -1402,6 +1545,7 @@ analyze_segmented_trend_complete <- function(data,
     bic_candidates = bic_table,
     wald_adjacent_slopes = if (selected_k == 0) NULL else wald_results,
     cd4_quantile_data = cd4_quantile_data,
-    cd4_quantile_plot = cd4_quantile_plot_obj
+    cd4_quantile_plot = cd4_quantile_plot_obj,
+    pc_period            = pc_period
   )
 }
