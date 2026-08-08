@@ -1,4 +1,4 @@
-# HIV Notification Time-Series Analysis
+# HIV Notification Temporal Trend Analysis
 
 This project contains the code to analyse trends in HIV notifications in
 Australia from 2001 to 2024, and to generate the tables and figures used in the
@@ -9,13 +9,12 @@ geographic inequality. Throughout, two groups are analysed separately:
 notifications with a **first-ever diagnosis in Australia (FED)** and those
 **previously diagnosed overseas (PDO)**.
 
-
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21847208.svg)](https://doi.org/10.5281/zenodo.21847208)
 
 ## Aims
 
-The aim of this analysis is to quantify how HIV notifications, CD4 count at
-diagnosis, and the geographic distribution of notifications across Australian
-PHNs have changed over 2001–2024. For the total population and for key
+The aim of this analysis is to quantify how HIV notifications and the geographic distribution of 
+notifications across Australian PHNs have changed over 2001–2024. For the total population and for key
 subgroups, the code produces trend estimates, change points, PHN-level rates,
 measures of geographic inequality, and a set of publication-ready tables and
 figures.
